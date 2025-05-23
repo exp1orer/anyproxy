@@ -1,0 +1,3 @@
+1. Developer want to expose the local services to the public users by client
+2. The client proactively connect the proxy gateway by websocket + TLS to build a channel, to accept the imcoming requests from proxy gateway
+3. The Public users can use a TLS + auth socks5 connect the gataway as a transparent proxy, users send any TCP or UDP request and data to the proxy gateway, the proxy gateway will push the request and data to a random client by TLS websocket, then the client forward the TCP/UDP requests to the target domain:port in lan environment or public internet, and return response back by TLS websocket

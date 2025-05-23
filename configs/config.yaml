@@ -1,0 +1,41 @@
+---
+
+proxy:
+  socks5:
+    listen_addr: ":1080"
+    auth_username: ""
+    auth_password: ""
+  http:
+    listen_addr: ":8080"
+    auth_username: ""
+    auth_password: ""
+
+gateway:
+  listen_addr: ":8443"
+  tls_cert: "certs/server.crt"
+  tls_key: "certs/server.key"
+  auth_username: "user"
+  auth_password: "password"
+
+client:
+  gateway_addr: "127.0.0.1:8443"
+  gateway_tls_cert: "certs/server.crt"
+  client_id: "client"
+  replicas: 1
+  max_concurrent_conns: 100
+  auth_username: "user"
+  auth_password: "password"
+  forbidden_hosts:
+    - "internal.example.com"
+    - "192.168.1."
+  limit:
+    - name: "web-server"
+      addr: "localhost:8080"
+      protocol: "tcp"
+    - name: "ssh"
+      addr: "localhost:22"
+      protocol: "tcp"
+    # 这是百度的一个IPv4地址，仅供测试
+    - name: "baidu"
+      addr: "39.156.66.10:443"
+      protocol: "tcp"
