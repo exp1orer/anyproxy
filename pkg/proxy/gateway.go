@@ -22,7 +22,7 @@ import (
 type Gateway struct {
 	config     *config.GatewayConfig
 	httpServer *http.Server
-	proxy      GatewayProxy
+	proxies    []GatewayProxy // Support multiple proxies
 	upgrader   websocket.Upgrader
 	clientsMu  sync.RWMutex
 	clients    map[string]*ClientConn
@@ -53,12 +53,35 @@ func NewGateway(cfg *config.Config) (*Gateway, error) {
 		return client.dialNetwork(network, addr)
 	}
 
-	// Create SOCKS5 proxy instance
-	proxy, err := NewSOCKS5Proxy(&cfg.Proxy.SOCKS5, dialFn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create SOCKS5 proxy: %v", err)
+	// Create proxy instances based on configuration
+	var proxies []GatewayProxy
+
+	// Create HTTP proxy if configured
+	if cfg.Proxy.HTTP.ListenAddr != "" {
+		httpProxy, err := NewHTTPProxy(&cfg.Proxy.HTTP, dialFn)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create HTTP proxy: %v", err)
+		}
+		proxies = append(proxies, httpProxy)
+		log.Printf("Created HTTP proxy on %s", cfg.Proxy.HTTP.ListenAddr)
 	}
-	gateway.proxy = proxy
+
+	// Create SOCKS5 proxy if configured
+	if cfg.Proxy.SOCKS5.ListenAddr != "" {
+		socks5Proxy, err := NewSOCKS5Proxy(&cfg.Proxy.SOCKS5, dialFn)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create SOCKS5 proxy: %v", err)
+		}
+		proxies = append(proxies, socks5Proxy)
+		log.Printf("Created SOCKS5 proxy on %s", cfg.Proxy.SOCKS5.ListenAddr)
+	}
+
+	// Ensure at least one proxy is configured
+	if len(proxies) == 0 {
+		return nil, fmt.Errorf("no proxy configured: please configure at least one of HTTP or SOCKS5 proxy")
+	}
+
+	gateway.proxies = proxies
 
 	return gateway, nil
 }
@@ -70,8 +93,18 @@ func (g *Gateway) Start() error {
 		return err
 	}
 
-	// Start the proxy server
-	return g.proxy.Start()
+	// Start all proxy servers
+	for i, proxy := range g.proxies {
+		if err := proxy.Start(); err != nil {
+			// If any proxy fails to start, stop the ones that already started
+			for j := 0; j < i; j++ {
+				g.proxies[j].Stop()
+			}
+			return fmt.Errorf("failed to start proxy %d: %v", i, err)
+		}
+	}
+
+	return nil
 }
 
 // startHTTPServer starts the HTTP server for WebSocket connections
@@ -125,9 +158,11 @@ func (g *Gateway) Stop() error {
 		log.Printf("Error shutting down HTTP server: %v", err)
 	}
 
-	// Step 3: Stop the SOCKS5 proxy server
-	if err := g.proxy.Stop(); err != nil {
-		log.Printf("Error stopping proxy: %v", err)
+	// Step 3: Stop all proxy servers
+	for i, proxy := range g.proxies {
+		if err := proxy.Stop(); err != nil {
+			log.Printf("Error stopping proxy %d: %v", i, err)
+		}
 	}
 
 	// Step 4: Give clients time to finish processing

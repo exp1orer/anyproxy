@@ -21,3 +21,4 @@ type GatewayProxy interface {
 type ProxyDialer func(ctx context.Context, network, addr string) (net.Conn, error)
 
 var _ GatewayProxy = &socks5Proxy{}
+var _ GatewayProxy = &httpProxy{}

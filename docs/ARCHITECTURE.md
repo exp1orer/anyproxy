@@ -2,15 +2,31 @@
 
 ## 概述
 
-AnyProxy 是一个基于 WebSocket + TLS 的反向代理系统，旨在安全地将内网服务暴露给公网用户。系统采用客户端主动连接的方式，避免了传统端口转发的安全风险。
+AnyProxy 是一个基于 WebSocket + TLS 的反向代理系统，旨在安全地将内网服务暴露给公网用户。系统采用客户端主动连接的方式，避免了传统端口转发的安全风险。支持同时运行 HTTP/HTTPS 和 SOCKS5 代理服务。
 
 ## 系统架构
 
+### 整体架构
+
 ```
-┌─────────────┐    SOCKS5     ┌─────────────┐    WebSocket+TLS    ┌─────────────┐    TCP/UDP    ┌─────────────┐
+┌─────────────┐  HTTP/SOCKS5  ┌─────────────┐    WebSocket+TLS    ┌─────────────┐    TCP/UDP    ┌─────────────┐
 │ 公网用户     │ ──────────────→ │ 网关(Gateway) │ ──────────────────→ │ 客户端(Client) │ ──────────────→ │ 目标服务     │
 │ (Internet)  │               │             │                    │             │               │ (LAN/WAN)   │
 └─────────────┘               └─────────────┘                    └─────────────┘               └─────────────┘
+```
+
+### 双代理架构
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   HTTP Client   │───▶│   HTTP Proxy     │    │                 │
+└─────────────────┘    │   (Port 8080)    │───▶│   Gateway       │
+                       └──────────────────┘    │                 │
+┌─────────────────┐    ┌──────────────────┐    │  ┌───────────┐  │
+│  SOCKS5 Client  │───▶│  SOCKS5 Proxy    │───▶│  │ WebSocket │  │
+└─────────────────┘    │   (Port 1080)    │    │  │ Clients   │  │
+                       └──────────────────┘    │  └───────────┘  │
+                                               └─────────────────┘
 ```
 
 ## 核心组件
@@ -19,6 +35,7 @@ AnyProxy 是一个基于 WebSocket + TLS 的反向代理系统，旨在安全地
 
 网关是系统的核心组件，负责：
 
+- **HTTP/HTTPS 代理服务**: 监听公网用户的 HTTP 代理连接请求
 - **SOCKS5 代理服务**: 监听公网用户的 SOCKS5 连接请求
 - **WebSocket 服务器**: 接受客户端的 WebSocket 连接
 - **请求路由**: 将公网用户的请求路由到合适的客户端
@@ -29,8 +46,8 @@ AnyProxy 是一个基于 WebSocket + TLS 的反向代理系统，旨在安全地
 
 ```go
 type Gateway struct {
-    socks5Server    *socks5.Server      // SOCKS5 代理服务器
-    wsServer        *http.Server        // WebSocket 服务器
+    httpServer      *http.Server        // WebSocket 服务器
+    proxies         []GatewayProxy      // 代理服务器列表 (HTTP + SOCKS5)
     clientManager   *ClientManager      // 客户端连接管理器
     config          *config.GatewayConfig
 }
@@ -38,12 +55,34 @@ type Gateway struct {
 
 #### 工作流程
 
-1. 启动 SOCKS5 代理服务，监听公网用户连接
+1. 根据配置启动 HTTP 和/或 SOCKS5 代理服务，监听公网用户连接
 2. 启动 WebSocket 服务器，等待客户端连接
 3. 当客户端连接时，进行 TLS 握手和身份验证
-4. 当公网用户发起 SOCKS5 请求时，选择一个可用客户端
+4. 当公网用户发起代理请求时，选择一个可用客户端
 5. 通过 WebSocket 将请求转发给客户端
 6. 将客户端的响应返回给公网用户
+
+#### 双代理支持
+
+网关现在支持同时运行多种代理类型：
+
+**HTTP/HTTPS 代理**:
+- 支持标准 HTTP 代理协议
+- 支持 CONNECT 方法用于 HTTPS 隧道
+- 支持基本认证 (Basic Authentication)
+- 处理 HTTP 请求头和响应头
+
+**SOCKS5 代理**:
+- 支持 SOCKS5 协议标准
+- 支持用户名/密码认证
+- 支持 TCP 和 UDP 连接
+- 兼容各种 SOCKS5 客户端
+
+**配置灵活性**:
+- 可以同时启动两种代理
+- 可以只启动其中一种代理
+- 每种代理有独立的监听端口和认证配置
+- 共享相同的客户端连接池
 
 ### 2. 客户端 (Client)
 
@@ -126,6 +165,21 @@ Client                    Gateway
 
 ### 2. 代理请求流程
 
+#### HTTP 代理请求流程
+
+```
+User          Gateway         Client          Target
+  │              │              │              │
+  │─ HTTP ───────→│              │              │
+  │              │─ WebSocket ──→│              │
+  │              │              │─ HTTP/HTTPS ─→│
+  │              │              │←─ Response ──│
+  │              │←─ WebSocket ──│              │
+  │←─ HTTP ──────│              │              │
+```
+
+#### SOCKS5 代理请求流程
+
 ```
 User          Gateway         Client          Target
   │              │              │              │
@@ -148,8 +202,10 @@ User          Gateway         Client          Target
 ### 2. 身份认证
 
 - **用户名密码**: 基于用户名密码的认证机制
+- **HTTP 代理认证**: 支持 HTTP 代理的基本认证 (Basic Authentication)
 - **SOCKS5 认证**: 支持 SOCKS5 协议的用户认证
 - **客户端认证**: 客户端连接网关时的身份验证
+- **独立认证**: 每种代理类型可配置独立的认证信息
 
 ### 3. 访问控制
 
@@ -166,6 +222,23 @@ type Config struct {
     Proxy   ProxyConfig   `yaml:"proxy"`
     Gateway GatewayConfig `yaml:"gateway"`
     Client  ClientConfig  `yaml:"client"`
+}
+
+type ProxyConfig struct {
+    HTTP   HTTPConfig   `yaml:"http"`
+    SOCKS5 SOCKS5Config `yaml:"socks5"`
+}
+
+type HTTPConfig struct {
+    ListenAddr   string `yaml:"listen_addr"`
+    AuthUsername string `yaml:"auth_username"`
+    AuthPassword string `yaml:"auth_password"`
+}
+
+type SOCKS5Config struct {
+    ListenAddr   string `yaml:"listen_addr"`
+    AuthUsername string `yaml:"auth_username"`
+    AuthPassword string `yaml:"auth_password"`
 }
 ```
 

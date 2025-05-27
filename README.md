@@ -5,21 +5,38 @@ AnyProxy 是一个基于 WebSocket + TLS 的代理系统，允许开发者将本
 ## 🚀 功能特性
 
 - **安全连接**: 使用 TLS + WebSocket 建立安全的代理通道
+- **双代理支持**: 同时支持 HTTP/HTTPS 和 SOCKS5 代理服务
+- **HTTP/HTTPS 代理**: 支持标准 HTTP 代理协议，包括 CONNECT 方法用于 HTTPS 隧道
 - **SOCKS5 代理**: 支持带认证的 SOCKS5 代理服务
-- **透明代理**: 公网用户可以通过 SOCKS5 连接网关，访问内网服务
+- **透明代理**: 公网用户可以通过代理连接网关，访问内网服务
 - **负载均衡**: 支持多客户端连接，自动负载均衡
 - **访问控制**: 支持黑名单和白名单机制
 - **服务限制**: 可配置允许访问的特定服务
+- **独立配置**: 每种代理类型都有独立的监听地址和认证配置
 
 ## 📋 系统架构
 
 ```
-公网用户 → SOCKS5代理 → 网关(Gateway) → WebSocket+TLS → 客户端(Client) → 目标服务
+公网用户 → HTTP/SOCKS5代理 → 网关(Gateway) → WebSocket+TLS → 客户端(Client) → 目标服务
 ```
 
 1. **客户端(Client)**: 主动连接代理网关，建立 WebSocket + TLS 通道
-2. **网关(Gateway)**: 接收公网用户的 SOCKS5 请求，转发给随机客户端
-3. **公网用户**: 通过 SOCKS5 代理连接网关，访问内网服务
+2. **网关(Gateway)**: 接收公网用户的 HTTP/SOCKS5 请求，转发给随机客户端
+3. **公网用户**: 通过 HTTP 或 SOCKS5 代理连接网关，访问内网服务
+
+### 双代理架构图
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   HTTP Client   │───▶│   HTTP Proxy     │    │                 │
+└─────────────────┘    │   (Port 8080)    │───▶│   Gateway       │
+                       └──────────────────┘    │                 │
+┌─────────────────┐    ┌──────────────────┐    │  ┌───────────┐  │
+│  SOCKS5 Client  │───▶│  SOCKS5 Proxy    │───▶│  │ WebSocket │  │
+└─────────────────┘    │   (Port 1080)    │    │  │ Clients   │  │
+                       └──────────────────┘    │  └───────────┘  │
+                                               └─────────────────┘
+```
 
 ## 🛠️ 安装与构建
 
@@ -82,14 +99,29 @@ client:
       protocol: "tcp"
 ```
 
-### SOCKS5 代理配置
+### 代理配置
+
+支持同时配置 HTTP 和 SOCKS5 代理：
+
 ```yaml
 proxy:
+  # HTTP 代理配置
+  http:
+    listen_addr: ":8080"      # HTTP 代理监听地址
+    auth_username: "http_user" # HTTP 代理认证用户名（可选）
+    auth_password: "http_pass" # HTTP 代理认证密码（可选）
+  
+  # SOCKS5 代理配置
   socks5:
     listen_addr: ":1080"      # SOCKS5 监听地址
-    auth_username: ""         # SOCKS5 认证用户名（可选）
-    auth_password: ""         # SOCKS5 认证密码（可选）
+    auth_username: "socks_user" # SOCKS5 认证用户名（可选）
+    auth_password: "socks_pass" # SOCKS5 认证密码（可选）
 ```
+
+**配置选项**:
+- 同时配置两个 `listen_addr` 可启动双代理
+- 只配置其中一个可启动单一代理
+- 如果都不配置会返回错误
 
 ## 🚀 使用方法
 
@@ -113,13 +145,32 @@ make run-client
 ./bin/anyproxy-client --config configs/config.yaml
 ```
 
-### 3. 使用 SOCKS5 代理
+### 3. 使用代理服务
 
-客户端连接成功后，公网用户可以通过 SOCKS5 代理访问内网服务：
+客户端连接成功后，公网用户可以通过 HTTP 或 SOCKS5 代理访问内网服务：
+
+#### HTTP 代理使用
+
+```bash
+# 使用 curl 通过 HTTP 代理访问服务
+curl -x http://http_user:http_pass@127.0.0.1:8080 https://target-service.com
+
+# 设置环境变量使用 HTTP 代理
+export http_proxy=http://http_user:http_pass@127.0.0.1:8080
+export https_proxy=http://http_user:http_pass@127.0.0.1:8080
+
+# 配置浏览器使用 HTTP 代理
+# 代理地址: 127.0.0.1:8080
+```
+
+#### SOCKS5 代理使用
 
 ```bash
 # 使用 curl 通过 SOCKS5 代理访问服务
-curl --socks5 127.0.0.1:1080 http://target-service.com
+curl --socks5 socks_user:socks_pass@127.0.0.1:1080 https://target-service.com
+
+# 设置环境变量使用 SOCKS5 代理
+export ALL_PROXY=socks5://socks_user:socks_pass@127.0.0.1:1080
 
 # 配置浏览器使用 SOCKS5 代理
 # 代理地址: 127.0.0.1:1080
@@ -164,10 +215,12 @@ make clean
 ## 📖 更多文档
 
 - [需求文档](design/requirement.md)
+- [双代理支持](docs/DUAL_PROXY.md)
 - [架构设计](docs/ARCHITECTURE.md)
 - [部署指南](docs/DEPLOYMENT.md)
 - [API 文档](docs/API.md)
 - [故障排除](docs/TROUBLESHOOTING.md)
+- [HTTP 代理故障排除](docs/HTTP_PROXY_TROUBLESHOOTING.md)
 
 ## 🤝 贡献
 

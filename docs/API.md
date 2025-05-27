@@ -2,7 +2,7 @@
 
 ## 概述
 
-AnyProxy 使用 WebSocket + TLS 协议进行客户端和网关之间的通信。本文档描述了通信协议、消息格式和 API 接口。
+AnyProxy 使用 WebSocket + TLS 协议进行客户端和网关之间的通信，同时支持 HTTP/HTTPS 和 SOCKS5 代理服务。本文档描述了通信协议、消息格式和 API 接口。
 
 ## WebSocket 连接
 
@@ -227,12 +227,12 @@ sequenceDiagram
     participant C as Client
     participant T as Target
     
-    U->>G: SOCKS5 Connect Request
+    U->>G: Proxy Connect Request (HTTP/SOCKS5)
     G->>C: Connect Message
     C->>T: TCP Connect
     T->>C: Connection Established
     C->>G: Connect Response (Success)
-    G->>U: SOCKS5 Response (Success)
+    G->>U: Proxy Response (Success)
     
     loop Data Transfer
         U->>G: Data
@@ -250,15 +250,29 @@ sequenceDiagram
 
 ## 配置 API
 
-### SOCKS5 代理配置
+### 代理配置
+
+支持同时配置 HTTP 和 SOCKS5 代理：
 
 ```yaml
 proxy:
+  # HTTP 代理配置
+  http:
+    listen_addr: ":8080"
+    auth_username: "http_user"
+    auth_password: "http_password"
+  
+  # SOCKS5 代理配置
   socks5:
     listen_addr: ":1080"
-    auth_username: "optional_username"
-    auth_password: "optional_password"
+    auth_username: "socks_user"
+    auth_password: "socks_password"
 ```
+
+**配置说明**:
+- 可以同时配置两种代理类型
+- 可以只配置其中一种代理类型
+- 每种代理有独立的监听地址和认证配置
 
 ### 网关配置
 
@@ -496,6 +510,49 @@ func handlePing(conn *websocket.Conn, msg Message) {
    - 验证 JSON 格式
    - 检查必需字段
    - 确认数据类型
+
+## HTTP 代理使用示例
+
+### 基本 HTTP 请求
+
+```bash
+# 使用 curl 通过 HTTP 代理
+curl -x http://http_user:http_password@localhost:8080 https://example.com
+
+# 设置环境变量
+export http_proxy=http://http_user:http_password@localhost:8080
+export https_proxy=http://http_user:http_password@localhost:8080
+curl https://example.com
+```
+
+### HTTPS 隧道 (CONNECT 方法)
+
+```bash
+# 使用 CONNECT 方法建立 HTTPS 隧道
+curl -x http://http_user:http_password@localhost:8080 https://secure.example.com
+```
+
+### 浏览器配置
+
+在浏览器中配置 HTTP 代理：
+- 代理类型: HTTP
+- 代理地址: localhost
+- 代理端口: 8080
+- 用户名: http_user
+- 密码: http_password
+
+## SOCKS5 代理使用示例
+
+### 基本 SOCKS5 请求
+
+```bash
+# 使用 curl 通过 SOCKS5 代理
+curl --socks5 socks_user:socks_password@localhost:1080 https://example.com
+
+# 设置环境变量
+export ALL_PROXY=socks5://socks_user:socks_password@localhost:1080
+curl https://example.com
+```
 
 ### 调试工具
 

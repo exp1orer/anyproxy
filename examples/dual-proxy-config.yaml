@@ -1,0 +1,43 @@
+# Example configuration for running both HTTP/HTTPS and SOCKS5 proxies simultaneously
+proxy:
+  # HTTP proxy configuration
+  http:
+    listen_addr: "0.0.0.0:8080"
+    auth_username: "http_user"
+    auth_password: "http_pass"
+  
+  # SOCKS5 proxy configuration
+  socks5:
+    listen_addr: "0.0.0.0:1080"
+    auth_username: "socks_user"
+    auth_password: "socks_pass"
+
+# Gateway configuration for WebSocket connections
+gateway:
+  listen_addr: "0.0.0.0:8443"
+  tls_cert: "certs/server.crt"
+  tls_key: "certs/server.key"
+  auth_username: "gateway_user"
+  auth_password: "gateway_pass"
+
+# Client configuration
+client:
+  gateway_addr: "wss://your-gateway.example.com:8443/ws"
+  gateway_tls_cert: "certs/server.crt"
+  client_id: "client-001"
+  replicas: 1
+  auth_username: "gateway_user"
+  auth_password: "gateway_pass"
+  forbidden_hosts:
+    - "localhost"
+    - "127.0.0.1"
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+  limit:
+    - name: "web_service"
+      addr: "example.com:80"
+      protocol: "tcp"
+    - name: "secure_web"
+      addr: "example.com:443"
+      protocol: "tcp"

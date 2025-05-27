@@ -41,7 +41,7 @@ func NewSOCKS5Proxy(cfg *config.SOCKS5Config, dialFunc ProxyDialer) (GatewayProx
 		config:     cfg,
 		server:     server,
 		dialFunc:   dialFunc,
-		listenAddr: net.JoinHostPort("0.0.0.0", "1080"), // Default SOCKS5 port
+		listenAddr: cfg.ListenAddr,
 	}, nil
 }
 

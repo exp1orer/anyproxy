@@ -231,6 +231,7 @@ func (c *ProxyClient) generateClientID() string {
 func (c *ProxyClient) createTLSConfig() (*tls.Config, error) {
 	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS12,
+		ServerName: strings.Split(c.config.GatewayAddr, ":")[0],
 	}
 
 	// If a certificate file is provided, load it
@@ -502,7 +503,7 @@ func (c *ProxyClient) isConnectionAllowed(address string) bool {
 	}
 
 	for _, forbidden := range c.config.ForbiddenHosts {
-		if strings.HasPrefix(host, forbidden) {
+		if strings.HasSuffix(host, forbidden) {
 			return false
 		}
 	}

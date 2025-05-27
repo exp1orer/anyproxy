@@ -6,6 +6,6 @@
 
 build/
 
-bin/
+bin/*
 
 vendor/

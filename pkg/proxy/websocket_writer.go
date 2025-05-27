@@ -88,7 +88,11 @@ func (w *WebSocketWriter) writeLoop() {
 func (w *WebSocketWriter) drainMessages() {
 	for {
 		select {
-		case msg := <-w.writeCh:
+		case msg, ok := <-w.writeCh:
+			if !ok {
+				return
+			}
+
 			if err := w.conn.WriteJSON(msg); err != nil {
 				slog.Error("Error writing final message", "error", err)
 			}

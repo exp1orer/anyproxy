@@ -4,8 +4,8 @@ all: certs build
 
 build:
 	mkdir -p bin
-	go build -o bin/anyproxy-gateway cmd/gateway/main.go
-	go build -o bin/anyproxy-client cmd/client/main.go
+	CGO_ENABLED=0 go build -o bin/anyproxy-gateway cmd/gateway/main.go
+	CGO_ENABLED=0 go build -o bin/anyproxy-client cmd/client/main.go
 
 certs:
 	bash generate_certs.sh
@@ -18,3 +18,7 @@ run-client: build
 
 clean:
 	rm -rf bin 
+
+package: build
+	mkdir -p build
+	tar -zcf build/anyproxy.tar.gz certs/ bin/anyproxy-gateway bin/anyproxy-client configs/config.yaml

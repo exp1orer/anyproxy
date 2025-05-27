@@ -51,15 +51,14 @@ type ServiceLimit struct {
 
 // ClientConfig represents the configuration for the proxy client
 type ClientConfig struct {
-	GatewayAddr        string         `yaml:"gateway_addr"`
-	GatewayTLSCert     string         `yaml:"gateway_tls_cert"`
-	ClientID           string         `yaml:"client_id"`
-	Replicas           int            `yaml:"replicas"`
-	MaxConcurrentConns int            `yaml:"max_concurrent_conns"`
-	AuthUsername       string         `yaml:"auth_username"`
-	AuthPassword       string         `yaml:"auth_password"`
-	ForbiddenHosts     []string       `yaml:"forbidden_hosts"`
-	Limits             []ServiceLimit `yaml:"limit"`
+	GatewayAddr    string         `yaml:"gateway_addr"`
+	GatewayTLSCert string         `yaml:"gateway_tls_cert"`
+	ClientID       string         `yaml:"client_id"`
+	Replicas       int            `yaml:"replicas"`
+	AuthUsername   string         `yaml:"auth_username"`
+	AuthPassword   string         `yaml:"auth_password"`
+	ForbiddenHosts []string       `yaml:"forbidden_hosts"`
+	Limits         []ServiceLimit `yaml:"limit"`
 }
 
 var conf *Config
