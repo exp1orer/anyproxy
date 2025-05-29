@@ -1,35 +1,35 @@
-# 双代理支持 (Dual Proxy Support)
+# Dual Proxy Support
 
-AnyProxy 现在支持同时运行 HTTP/HTTPS 和 SOCKS5 代理服务器。
+AnyProxy now supports running both HTTP/HTTPS and SOCKS5 proxy servers simultaneously.
 
-## 功能特性
+## Features
 
-- **HTTP/HTTPS 代理**: 支持标准的 HTTP 代理协议，包括 CONNECT 方法用于 HTTPS 隧道
-- **SOCKS5 代理**: 支持 SOCKS5 协议
-- **同时运行**: 可以同时启动两种代理类型
-- **独立配置**: 每种代理类型都有独立的监听地址和认证配置
-- **统一后端**: 两种代理都使用相同的 WebSocket 客户端连接池
+- **HTTP/HTTPS Proxy**: Supports standard HTTP proxy protocol, including CONNECT method for HTTPS tunneling
+- **SOCKS5 Proxy**: Supports SOCKS5 protocol
+- **Simultaneous Operation**: Can start both proxy types at the same time
+- **Independent Configuration**: Each proxy type has independent listening addresses and authentication configuration
+- **Unified Backend**: Both proxies use the same WebSocket client connection pool
 
-## 配置说明
+## Configuration
 
-### 同时启动两种代理
+### Start Both Proxy Types
 
 ```yaml
 proxy:
-  # HTTP 代理配置
+  # HTTP proxy configuration
   http:
     listen_addr: "0.0.0.0:8080"
     auth_username: "http_user"
     auth_password: "http_pass"
   
-  # SOCKS5 代理配置
+  # SOCKS5 proxy configuration
   socks5:
     listen_addr: "0.0.0.0:1080"
     auth_username: "socks_user"
     auth_password: "socks_pass"
 ```
 
-### 仅启动 HTTP 代理
+### HTTP Proxy Only
 
 ```yaml
 proxy:
@@ -37,10 +37,10 @@ proxy:
     listen_addr: "0.0.0.0:8080"
     auth_username: "http_user"
     auth_password: "http_pass"
-  # socks5 部分留空或不配置 listen_addr
+  # Leave socks5 section empty or don't configure listen_addr
 ```
 
-### 仅启动 SOCKS5 代理
+### SOCKS5 Proxy Only
 
 ```yaml
 proxy:
@@ -48,53 +48,53 @@ proxy:
     listen_addr: "0.0.0.0:1080"
     auth_username: "socks_user"
     auth_password: "socks_pass"
-  # http 部分留空或不配置 listen_addr
+  # Leave http section empty or don't configure listen_addr
 ```
 
-## HTTP 代理功能
+## HTTP Proxy Features
 
-### 支持的方法
+### Supported Methods
 
-- **GET, POST, PUT, DELETE** 等标准 HTTP 方法
-- **CONNECT** 方法用于 HTTPS 隧道
+- **GET, POST, PUT, DELETE** and other standard HTTP methods
+- **CONNECT** method for HTTPS tunneling
 
-### 认证
+### Authentication
 
-HTTP 代理支持基本认证 (Basic Authentication):
+HTTP proxy supports Basic Authentication:
 
 ```
 Proxy-Authorization: Basic <base64(username:password)>
 ```
 
-### 使用示例
+### Usage Examples
 
 ```bash
-# 使用 curl 通过 HTTP 代理访问网站
+# Use curl through HTTP proxy to access websites
 curl -x http://http_user:http_pass@localhost:8080 https://example.com
 
-# 设置环境变量
+# Set environment variables
 export http_proxy=http://http_user:http_pass@localhost:8080
 export https_proxy=http://http_user:http_pass@localhost:8080
 ```
 
-## SOCKS5 代理功能
+## SOCKS5 Proxy Features
 
-### 认证方法
+### Authentication Methods
 
-- 无认证
-- 用户名/密码认证
+- No authentication
+- Username/password authentication
 
-### 使用示例
+### Usage Examples
 
 ```bash
-# 使用 curl 通过 SOCKS5 代理
+# Use curl through SOCKS5 proxy
 curl --socks5 socks_user:socks_pass@localhost:1080 https://example.com
 
-# 设置环境变量
+# Set environment variables
 export ALL_PROXY=socks5://socks_user:socks_pass@localhost:1080
 ```
 
-## 架构说明
+## Architecture
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
@@ -108,27 +108,27 @@ export ALL_PROXY=socks5://socks_user:socks_pass@localhost:1080
                                                └─────────────────┘
 ```
 
-## 日志输出
+## Log Output
 
-启动时会显示已创建的代理类型：
+At startup, the system displays the created proxy types:
 
 ```
 2025/05/27 16:05:08 Created HTTP proxy on 0.0.0.0:8080
 2025/05/27 16:05:08 Created SOCKS5 proxy on 0.0.0.0:1080
 ```
 
-## 错误处理
+## Error Handling
 
-- 如果两种代理都没有配置 `listen_addr`，系统会返回错误
-- 如果某个代理启动失败，已启动的代理会被停止
-- 每种代理的错误都会独立记录
+- If neither proxy type has `listen_addr` configured, the system returns an error
+- If one proxy fails to start, already started proxies will be stopped
+- Errors for each proxy type are logged independently
 
-## 性能考虑
+## Performance Considerations
 
-- 两种代理共享相同的客户端连接池
-- 连接负载均衡在客户端级别进行
-- 每种代理类型都有独立的监听端口，避免端口冲突
+- Both proxy types share the same client connection pool
+- Connection load balancing is performed at the client level
+- Each proxy type has independent listening ports to avoid port conflicts
 
-## 示例配置文件
+## Example Configuration File
 
-完整的配置示例请参考 `examples/dual-proxy-config.yaml`。 
+For complete configuration examples, please refer to `examples/dual-proxy-config.yaml`. 

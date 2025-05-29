@@ -1,132 +1,132 @@
-# AnyProxy 故障排除指南
+# AnyProxy Troubleshooting Guide
 
-## 概述
+## Overview
 
-本文档提供了 AnyProxy 常见问题的诊断和解决方案，帮助用户快速定位和解决问题。
+This document provides diagnosis and solutions for common AnyProxy issues, helping users quickly locate and resolve problems.
 
-## 常见问题分类
+## Common Issue Categories
 
-### 1. 连接问题
+### 1. Connection Issues
 
-#### 1.1 WebSocket 连接失败
+#### 1.1 WebSocket Connection Failure
 
-**症状**：
-- 客户端无法连接到网关
-- 连接立即断开
-- 连接超时
+**Symptoms**:
+- Client cannot connect to gateway
+- Connection drops immediately
+- Connection timeout
 
-**可能原因**：
-- 网络连通性问题
-- 防火墙阻止连接
-- TLS 证书问题
-- 端口被占用
+**Possible Causes**:
+- Network connectivity issues
+- Firewall blocking connections
+- TLS certificate problems
+- Port already in use
 
-**诊断步骤**：
+**Diagnostic Steps**:
 
 ```bash
-# 1. 检查网络连通性
+# 1. Check network connectivity
 ping gateway-host
 
-# 2. 检查端口是否开放
+# 2. Check if port is open
 telnet gateway-host 8443
 
-# 3. 检查 TLS 连接
+# 3. Check TLS connection
 openssl s_client -connect gateway-host:8443
 
-# 4. 检查端口占用
+# 4. Check port usage
 netstat -an | grep 8443
 ```
 
-**解决方案**：
+**Solutions**:
 
 ```bash
-# 检查防火墙设置
+# Check firewall settings
 sudo ufw status
 sudo firewall-cmd --list-ports
 
-# 开放端口
+# Open ports
 sudo ufw allow 8443/tcp
 sudo firewall-cmd --permanent --add-port=8443/tcp && sudo firewall-cmd --reload
 
-# 检查服务状态
+# Check service status
 sudo systemctl status anyproxy-gateway
 
-# 重启服务
+# Restart service
 sudo systemctl restart anyproxy-gateway
 ```
 
-#### 1.2 TLS 握手失败
+#### 1.2 TLS Handshake Failure
 
-**症状**：
-- SSL/TLS 握手错误
-- 证书验证失败
-- 连接被重置
+**Symptoms**:
+- SSL/TLS handshake errors
+- Certificate verification failure
+- Connection reset
 
-**可能原因**：
-- 证书过期或无效
-- 证书路径错误
-- TLS 版本不兼容
-- 时间同步问题
+**Possible Causes**:
+- Certificate expired or invalid
+- Incorrect certificate path
+- TLS version incompatibility
+- Time synchronization issues
 
-**诊断步骤**：
+**Diagnostic Steps**:
 
 ```bash
-# 检查证书有效性
+# Check certificate validity
 openssl x509 -in certs/server.crt -text -noout
 
-# 检查证书过期时间
+# Check certificate expiration
 openssl x509 -in certs/server.crt -enddate -noout
 
-# 检查系统时间
+# Check system time
 date
 ntpdate -q pool.ntp.org
 ```
 
-**解决方案**：
+**Solutions**:
 
 ```bash
-# 重新生成证书
+# Regenerate certificates
 bash generate_certs.sh your-domain.com
 
-# 同步系统时间
+# Synchronize system time
 sudo ntpdate pool.ntp.org
 
-# 检查证书权限
+# Check certificate permissions
 ls -la certs/
 sudo chown anyproxy:anyproxy certs/*
 sudo chmod 600 certs/server.key
 sudo chmod 644 certs/server.crt
 ```
 
-### 2. 认证问题
+### 2. Authentication Issues
 
-#### 2.1 认证失败
+#### 2.1 Authentication Failure
 
-**症状**：
-- 客户端连接后立即断开
-- 认证错误消息
-- 无法通过 SOCKS5 认证
+**Symptoms**:
+- Client disconnects immediately after connection
+- Authentication error messages
+- Unable to authenticate through SOCKS5
 
-**可能原因**：
-- 用户名密码错误
-- 配置文件不匹配
-- 特殊字符编码问题
+**Possible Causes**:
+- Incorrect username/password
+- Configuration file mismatch
+- Special character encoding issues
 
-**诊断步骤**：
+**Diagnostic Steps**:
 
 ```bash
-# 检查配置文件
+# Check configuration file
 cat configs/config.yaml | grep -A5 -B5 auth
 
-# 检查日志
+# Check logs
 sudo journalctl -u anyproxy-gateway | grep auth
 sudo journalctl -u anyproxy-client | grep auth
 ```
 
-**解决方案**：
+**Solutions**:
 
 ```yaml
-# 确保网关和客户端配置一致
+# Ensure gateway and client configurations match
 gateway:
   auth_username: "same_username"
   auth_password: "same_password"
@@ -136,279 +136,279 @@ client:
   auth_password: "same_password"
 ```
 
-### 3. 性能问题
+### 3. Performance Issues
 
-#### 3.1 连接缓慢
+#### 3.1 Slow Connections
 
-**症状**：
-- 建立连接时间过长
-- 数据传输速度慢
-- 高延迟
+**Symptoms**:
+- Long connection establishment time
+- Slow data transfer speed
+- High latency
 
-**可能原因**：
-- 网络带宽限制
-- 系统资源不足
-- 配置参数不当
+**Possible Causes**:
+- Network bandwidth limitations
+- Insufficient system resources
+- Improper configuration parameters
 
-**诊断步骤**：
+**Diagnostic Steps**:
 
 ```bash
-# 检查系统资源
+# Check system resources
 top
 free -h
 iostat 1
 
-# 检查网络状态
+# Check network status
 iftop
 netstat -i
 
-# 检查连接数
+# Check connection count
 ss -s
 ```
 
-**解决方案**：
+**Solutions**:
 
 ```yaml
-# 优化配置参数
+# Optimize configuration parameters
 client:
-  replicas: 3                    # 增加客户端副本数
-  max_concurrent_conns: 1000     # 增加最大并发连接数
+  replicas: 3                    # Increase client replica count
+  max_concurrent_conns: 1000     # Increase maximum concurrent connections
 ```
 
 ```bash
-# 系统优化
+# System optimization
 echo 'net.core.rmem_max = 16777216' >> /etc/sysctl.conf
 echo 'net.core.wmem_max = 16777216' >> /etc/sysctl.conf
 sysctl -p
 ```
 
-#### 3.2 内存泄漏
+#### 3.2 Memory Leaks
 
-**症状**：
-- 内存使用持续增长
-- 系统变慢
-- 最终内存耗尽
+**Symptoms**:
+- Continuously growing memory usage
+- System slowdown
+- Eventually running out of memory
 
-**诊断步骤**：
+**Diagnostic Steps**:
 
 ```bash
-# 监控内存使用
+# Monitor memory usage
 watch -n 1 'ps aux | grep anyproxy'
 
-# 检查内存详情
+# Check memory details
 pmap -d $(pgrep anyproxy-gateway)
 
-# 使用 valgrind 检查（如果可用）
+# Use valgrind for checking (if available)
 valgrind --tool=memcheck --leak-check=full ./bin/anyproxy-gateway
 ```
 
-**解决方案**：
+**Solutions**:
 
 ```bash
-# 重启服务释放内存
+# Restart services to free memory
 sudo systemctl restart anyproxy-gateway anyproxy-client
 
-# 设置内存限制
+# Set memory limits
 sudo systemctl edit anyproxy-gateway
-# 添加：
+# Add:
 # [Service]
 # MemoryLimit=1G
 ```
 
-### 4. 配置问题
+### 4. Configuration Issues
 
-#### 4.1 配置文件错误
+#### 4.1 Configuration File Errors
 
-**症状**：
-- 服务启动失败
-- 配置解析错误
-- 功能异常
+**Symptoms**:
+- Service startup failure
+- Configuration parsing errors
+- Abnormal functionality
 
-**诊断步骤**：
+**Diagnostic Steps**:
 
 ```bash
-# 验证 YAML 语法
+# Validate YAML syntax
 python3 -c "import yaml; yaml.safe_load(open('configs/config.yaml'))"
 
-# 检查配置文件权限
+# Check configuration file permissions
 ls -la configs/config.yaml
 
-# 手动测试配置
+# Manually test configuration
 ./bin/anyproxy-gateway --config configs/config.yaml --dry-run
 ```
 
-**解决方案**：
+**Solutions**:
 
 ```bash
-# 备份原配置
+# Backup original configuration
 cp configs/config.yaml configs/config.yaml.backup
 
-# 使用示例配置
+# Use example configuration
 cp configs/config.yaml.example configs/config.yaml
 
-# 逐步修改配置并测试
+# Gradually modify configuration and test
 ```
 
-#### 4.2 端口冲突
+#### 4.2 Port Conflicts
 
-**症状**：
-- 服务启动失败
-- "地址已在使用"错误
-- 端口绑定失败
+**Symptoms**:
+- Service startup failure
+- "Address already in use" error
+- Port binding failure
 
-**诊断步骤**：
+**Diagnostic Steps**:
 
 ```bash
-# 检查端口占用
+# Check port usage
 sudo netstat -tlnp | grep :8443
 sudo lsof -i :8443
 
-# 检查进程
+# Check processes
 ps aux | grep anyproxy
 ```
 
-**解决方案**：
+**Solutions**:
 
 ```bash
-# 杀死占用端口的进程
+# Kill process occupying the port
 sudo kill -9 $(lsof -t -i:8443)
 
-# 或者修改配置使用其他端口
+# Or modify configuration to use different port
 sed -i 's/:8443/:8444/g' configs/config.yaml
 ```
 
-### 5. 网络问题
+### 5. Network Issues
 
-#### 5.1 DNS 解析失败
+#### 5.1 DNS Resolution Failure
 
-**症状**：
-- 无法连接到目标主机
-- DNS 查询超时
-- 域名解析错误
+**Symptoms**:
+- Cannot connect to target host
+- DNS query timeout
+- Domain name resolution errors
 
-**诊断步骤**：
+**Diagnostic Steps**:
 
 ```bash
-# 测试 DNS 解析
+# Test DNS resolution
 nslookup target-host
 dig target-host
 
-# 检查 DNS 配置
+# Check DNS configuration
 cat /etc/resolv.conf
 
-# 测试不同 DNS 服务器
+# Test different DNS servers
 nslookup target-host 8.8.8.8
 ```
 
-**解决方案**：
+**Solutions**:
 
 ```bash
-# 修改 DNS 配置
+# Modify DNS configuration
 echo 'nameserver 8.8.8.8' >> /etc/resolv.conf
 echo 'nameserver 8.8.4.4' >> /etc/resolv.conf
 
-# 清除 DNS 缓存
+# Clear DNS cache
 sudo systemctl restart systemd-resolved
 ```
 
-#### 5.2 防火墙阻止
+#### 5.2 Firewall Blocking
 
-**症状**：
-- 连接被拒绝
-- 超时错误
-- 部分功能不可用
+**Symptoms**:
+- Connection refused
+- Timeout errors
+- Partial functionality unavailable
 
-**诊断步骤**：
+**Diagnostic Steps**:
 
 ```bash
-# 检查 iptables 规则
+# Check iptables rules
 sudo iptables -L -n
 
-# 检查 ufw 状态
+# Check ufw status
 sudo ufw status verbose
 
-# 检查 firewalld
+# Check firewalld
 sudo firewall-cmd --list-all
 ```
 
-**解决方案**：
+**Solutions**:
 
 ```bash
-# UFW 配置
+# UFW configuration
 sudo ufw allow from any to any port 8443
 sudo ufw allow from any to any port 1080
 
-# firewalld 配置
+# firewalld configuration
 sudo firewall-cmd --permanent --add-port=8443/tcp
 sudo firewall-cmd --permanent --add-port=1080/tcp
 sudo firewall-cmd --reload
 
-# iptables 配置
+# iptables configuration
 sudo iptables -A INPUT -p tcp --dport 8443 -j ACCEPT
 sudo iptables -A INPUT -p tcp --dport 1080 -j ACCEPT
 ```
 
-## 日志分析
+## Log Analysis
 
-### 日志位置
+### Log Locations
 
 ```bash
-# systemd 日志
+# systemd logs
 sudo journalctl -u anyproxy-gateway
 sudo journalctl -u anyproxy-client
 
-# 文件日志（如果配置）
+# File logs (if configured)
 tail -f /var/log/anyproxy/gateway.log
 tail -f /var/log/anyproxy/client.log
 ```
 
-### 常见错误消息
+### Common Error Messages
 
 #### "connection refused"
 
 ```bash
-# 检查服务状态
+# Check service status
 sudo systemctl status anyproxy-gateway
 
-# 检查端口监听
+# Check port listening
 sudo netstat -tlnp | grep anyproxy
 ```
 
 #### "certificate verify failed"
 
 ```bash
-# 检查证书
+# Check certificate
 openssl verify certs/server.crt
 
-# 重新生成证书
+# Regenerate certificate
 bash generate_certs.sh
 ```
 
 #### "authentication failed"
 
 ```bash
-# 检查配置
+# Check configuration
 grep -r auth configs/
 
-# 检查密码特殊字符
+# Check password special characters
 echo "password" | od -c
 ```
 
-### 启用调试日志
+### Enable Debug Logging
 
 ```yaml
-# 在配置文件中添加
+# Add to configuration file
 logging:
   level: debug
   output: /var/log/anyproxy/debug.log
 ```
 
-## 监控和诊断工具
+## Monitoring and Diagnostic Tools
 
-### 系统监控
+### System Monitoring
 
 ```bash
-# 实时监控脚本
+# Real-time monitoring script
 #!/bin/bash
 while true; do
     echo "=== $(date) ==="
@@ -421,32 +421,32 @@ while true; do
 done
 ```
 
-### 网络诊断
+### Network Diagnostics
 
 ```bash
-# 连接测试脚本
+# Connection test script
 #!/bin/bash
 HOST="gateway-host"
 PORT="8443"
 
 echo "Testing connection to $HOST:$PORT"
 
-# TCP 连接测试
+# TCP connection test
 timeout 5 bash -c "</dev/tcp/$HOST/$PORT" && echo "TCP connection: OK" || echo "TCP connection: FAILED"
 
-# TLS 连接测试
+# TLS connection test
 echo | timeout 5 openssl s_client -connect $HOST:$PORT 2>/dev/null && echo "TLS connection: OK" || echo "TLS connection: FAILED"
 
-# WebSocket 测试（需要 wscat）
+# WebSocket test (requires wscat)
 if command -v wscat >/dev/null; then
     timeout 5 wscat -c wss://$HOST:$PORT/ws --no-check && echo "WebSocket connection: OK" || echo "WebSocket connection: FAILED"
 fi
 ```
 
-### 性能测试
+### Performance Testing
 
 ```bash
-# 简单性能测试
+# Simple performance test
 #!/bin/bash
 PROXY_HOST="127.0.0.1"
 PROXY_PORT="1080"
@@ -463,47 +463,47 @@ for i in {1..10}; do
 done
 ```
 
-## 恢复程序
+## Recovery Procedures
 
-### 服务恢复
+### Service Recovery
 
 ```bash
 #!/bin/bash
-# 服务恢复脚本
+# Service recovery script
 
 echo "Starting AnyProxy recovery procedure..."
 
-# 停止服务
+# Stop services
 sudo systemctl stop anyproxy-gateway anyproxy-client
 
-# 检查进程
+# Check processes
 if pgrep anyproxy; then
     echo "Killing remaining processes..."
     sudo pkill -f anyproxy
     sleep 5
 fi
 
-# 清理临时文件
+# Clean temporary files
 sudo rm -f /tmp/anyproxy-*
 
-# 检查配置
+# Check configuration
 if ! python3 -c "import yaml; yaml.safe_load(open('configs/config.yaml'))" 2>/dev/null; then
     echo "Configuration file is invalid, restoring backup..."
     sudo cp configs/config.yaml.backup configs/config.yaml
 fi
 
-# 检查证书
+# Check certificates
 if ! openssl x509 -in certs/server.crt -noout 2>/dev/null; then
     echo "Certificate is invalid, regenerating..."
     bash generate_certs.sh
 fi
 
-# 重启服务
+# Restart services
 sudo systemctl start anyproxy-gateway
 sleep 5
 sudo systemctl start anyproxy-client
 
-# 验证服务状态
+# Verify service status
 if systemctl is-active --quiet anyproxy-gateway && systemctl is-active --quiet anyproxy-client; then
     echo "Recovery successful!"
 else
@@ -513,11 +513,11 @@ else
 fi
 ```
 
-### 配置恢复
+### Configuration Recovery
 
 ```bash
 #!/bin/bash
-# 配置恢复脚本
+# Configuration recovery script
 
 BACKUP_DIR="/backup/anyproxy"
 CONFIG_DIR="/etc/anyproxy"
@@ -533,31 +533,31 @@ else
 fi
 ```
 
-## 预防措施
+## Preventive Measures
 
-### 定期维护
+### Regular Maintenance
 
 ```bash
-# 添加到 crontab
-# 每日备份配置
+# Add to crontab
+# Daily configuration backup
 0 2 * * * /opt/anyproxy/backup.sh
 
-# 每周重启服务
+# Weekly service restart
 0 3 * * 0 systemctl restart anyproxy-gateway anyproxy-client
 
-# 每月清理日志
+# Monthly log cleanup
 0 4 1 * * find /var/log/anyproxy -name "*.log" -mtime +30 -delete
 ```
 
-### 监控告警
+### Monitoring Alerts
 
 ```bash
 #!/bin/bash
-# 监控脚本，可配置为 cron 任务
+# Monitoring script, can be configured as cron job
 
 ALERT_EMAIL="admin@example.com"
 
-# 检查服务状态
+# Check service status
 if ! systemctl is-active --quiet anyproxy-gateway; then
     echo "AnyProxy Gateway is down!" | mail -s "AnyProxy Alert" $ALERT_EMAIL
 fi
@@ -566,27 +566,27 @@ if ! systemctl is-active --quiet anyproxy-client; then
     echo "AnyProxy Client is down!" | mail -s "AnyProxy Alert" $ALERT_EMAIL
 fi
 
-# 检查内存使用
+# Check memory usage
 MEMORY_USAGE=$(ps -o %mem -C anyproxy-gateway --no-headers | awk '{sum+=$1} END {print sum}')
 if (( $(echo "$MEMORY_USAGE > 80" | bc -l) )); then
     echo "High memory usage: ${MEMORY_USAGE}%" | mail -s "AnyProxy Memory Alert" $ALERT_EMAIL
 fi
 ```
 
-## 联系支持
+## Contact Support
 
-如果以上解决方案都无法解决问题，请：
+If none of the above solutions resolve the issue, please:
 
-1. 收集相关日志和配置文件
-2. 记录详细的错误信息和重现步骤
-3. 提供系统环境信息
-4. 在 GitHub 仓库创建 Issue 或联系技术支持
+1. Collect relevant logs and configuration files
+2. Record detailed error information and reproduction steps
+3. Provide system environment information
+4. Create an Issue in the GitHub repository or contact technical support
 
-### 信息收集脚本
+### Information Collection Script
 
 ```bash
 #!/bin/bash
-# 收集诊断信息
+# Collect diagnostic information
 
 REPORT_FILE="anyproxy-diagnostic-$(date +%Y%m%d-%H%M%S).txt"
 

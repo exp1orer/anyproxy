@@ -6,6 +6,9 @@
 
 build/
 
-bin/*
+bin/
 
 vendor/
+
+coverage.html
+coverage.out    

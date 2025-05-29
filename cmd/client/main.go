@@ -2,13 +2,14 @@ package main
 
 import (
 	"flag"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 
 	"github.com/buhuipao/anyproxy/pkg/config"
+	"github.com/buhuipao/anyproxy/pkg/logger"
 	"github.com/buhuipao/anyproxy/pkg/proxy"
 )
 
@@ -20,7 +21,14 @@ func main() {
 	// Load configuration
 	cfg, err := config.LoadConfig(*configFile)
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		slog.Error("Failed to load configuration", "error", err)
+		os.Exit(1)
+	}
+
+	// Initialize logger
+	if err := logger.Init(&cfg.Log); err != nil {
+		slog.Error("Failed to initialize logger", "error", err)
+		os.Exit(1)
 	}
 
 	var clients []*proxy.ProxyClient
@@ -28,17 +36,19 @@ func main() {
 		// Create and start client
 		client, err := proxy.NewClient(&cfg.Client)
 		if err != nil {
-			log.Fatalf("Failed to create client: %v", err)
+			slog.Error("Failed to create client", "error", err)
+			os.Exit(1)
 		}
 
 		// Start client (non-blocking)
 		if err := client.Start(); err != nil {
-			log.Fatalf("Failed to start client: %v", err)
+			slog.Error("Failed to start client", "error", err)
+			os.Exit(1)
 		}
 
 		clients = append(clients, client)
 	}
-	log.Printf("Started %d client(s), connecting to gateway at %s", cfg.Client.Replicas, cfg.Client.GatewayAddr)
+	slog.Info("Started clients", "count", cfg.Client.Replicas, "gateway_addr", cfg.Client.GatewayAddr)
 
 	// Handle signals for graceful shutdown
 	sigCh := make(chan os.Signal, 1)
@@ -46,7 +56,7 @@ func main() {
 
 	// Wait for termination signal
 	<-sigCh
-	log.Println("Shutting down...")
+	slog.Info("Shutting down...")
 
 	// Stop all clients concurrently
 	var stopWg sync.WaitGroup
@@ -55,12 +65,12 @@ func main() {
 		go func(c *proxy.ProxyClient) {
 			defer stopWg.Done()
 			if err := c.Stop(); err != nil {
-				log.Printf("Error shutting down client: %v", err)
+				slog.Error("Error shutting down client", "error", err)
 			}
 		}(client)
 	}
 
 	// Wait for all clients to stop
 	stopWg.Wait()
-	log.Println("All clients stopped")
+	slog.Info("All clients stopped")
 }

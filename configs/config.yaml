@@ -1,5 +1,15 @@
 ---
 
+log:
+  level: "info"           
+  format: "text"          
+  output: "stdout"        
+  file: "logs/anyproxy.log"
+  max_size: 100           
+  max_backups: 5          
+  max_age: 30             
+  compress: true          
+
 proxy:
   socks5:
     listen_addr: ":1080"
@@ -30,13 +40,8 @@ client:
     - "localhost"
     - "192.168.1.1"
     - "internal.example.com"
-  limit:
-    - name: "web-server"
-      addr: "localhost:8080"
-      protocol: "tcp"
-    - name: "ssh"
-      addr: "localhost:22"
-      protocol: "tcp"
-    - name: "baidu"
-      addr: "39.156.66.10:443"
-      protocol: "tcp"
+  allowed_hosts:
+    - "example.com"
+    - "example.org"
+    - "example.net"
+    - ".*"

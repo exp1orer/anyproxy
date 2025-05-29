@@ -7,7 +7,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -58,9 +58,9 @@ func (h *httpProxy) Start() error {
 
 	// Start HTTP proxy server in a separate goroutine
 	go func() {
-		log.Printf("Starting HTTP proxy server on %s", h.listenAddr)
+		slog.Info("Starting HTTP proxy server", "listen_addr", h.listenAddr)
 		if err := h.server.Serve(listener); err != nil && err != http.ErrServerClosed {
-			log.Printf("HTTP proxy server error: %v", err)
+			slog.Error("HTTP proxy server error", "error", err)
 		}
 	}()
 
@@ -69,14 +69,14 @@ func (h *httpProxy) Start() error {
 
 // Stop stops the HTTP proxy server
 func (h *httpProxy) Stop() error {
-	log.Printf("Stopping HTTP proxy server on %s", h.listenAddr)
+	slog.Info("Stopping HTTP proxy server", "listen_addr", h.listenAddr)
 
 	// Graceful shutdown with timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := h.server.Shutdown(ctx); err != nil {
-		log.Printf("HTTP proxy server shutdown error: %v", err)
+		slog.Error("HTTP proxy server shutdown error", "error", err)
 		// Force close if graceful shutdown fails
 		if h.listener != nil {
 			return h.listener.Close()
@@ -162,19 +162,19 @@ func (h *httpProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 		host += ":443" // Default HTTPS port
 	}
 
-	log.Printf("CONNECT request to %s", host)
+	slog.Info("CONNECT request", "host", host)
 
 	// Hijack the connection first to handle raw TCP tunneling
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
-		log.Printf("Hijacking not supported")
+		slog.Error("Hijacking not supported")
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	clientConn, clientBuf, err := hijacker.Hijack()
 	if err != nil {
-		log.Printf("Failed to hijack connection: %v", err)
+		slog.Error("Failed to hijack connection", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -183,7 +183,7 @@ func (h *httpProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Create connection to target through the dial function
 	targetConn, err := h.dialFunc(r.Context(), "tcp", host)
 	if err != nil {
-		log.Printf("Failed to connect to %s: %v", host, err)
+		slog.Error("Failed to connect", "host", host, "error", err)
 		// Send error response manually since we've hijacked the connection
 		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
@@ -193,7 +193,7 @@ func (h *httpProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Send 200 Connection Established response manually
 	_, err = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 	if err != nil {
-		log.Printf("Failed to send CONNECT response: %v", err)
+		slog.Error("Failed to send CONNECT response", "error", err)
 		return
 	}
 
@@ -208,7 +208,7 @@ func (h *httpProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	go h.transfer(targetConn, clientConn, "target->client")
 	h.transfer(clientConn, targetConn, "client->target")
 
-	log.Printf("CONNECT tunnel to %s closed", host)
+	slog.Info("CONNECT tunnel closed", "host", host)
 }
 
 // handleHTTPRequest handles regular HTTP requests (non-CONNECT)
@@ -229,7 +229,7 @@ func (h *httpProxy) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	log.Printf("HTTP request to %s", targetURL.String())
+	slog.Info("HTTP request", "url", targetURL.String())
 
 	// Create connection to target
 	host := targetURL.Host
@@ -243,7 +243,7 @@ func (h *httpProxy) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 
 	targetConn, err := h.dialFunc(r.Context(), "tcp", host)
 	if err != nil {
-		log.Printf("Failed to connect to %s: %v", host, err)
+		slog.Error("Failed to connect", "host", host, "error", err)
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
@@ -266,7 +266,7 @@ func (h *httpProxy) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 
 	// Write request to target server
 	if err := r.Write(targetConn); err != nil {
-		log.Printf("Failed to write request to target: %v", err)
+		slog.Error("Failed to write request to target", "error", err)
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
@@ -275,7 +275,7 @@ func (h *httpProxy) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 	targetReader := bufio.NewReader(targetConn)
 	resp, err := http.ReadResponse(targetReader, r)
 	if err != nil {
-		log.Printf("Failed to read response from target: %v", err)
+		slog.Error("Failed to read response from target", "error", err)
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
@@ -294,10 +294,10 @@ func (h *httpProxy) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 	// Copy response body
 	_, err = io.Copy(w, resp.Body)
 	if err != nil {
-		log.Printf("Failed to copy response body: %v", err)
+		slog.Error("Failed to copy response body", "error", err)
 	}
 
-	log.Printf("HTTP request to %s completed", targetURL.String())
+	slog.Info("HTTP request completed", "url", targetURL.String())
 }
 
 // transfer copies data between two connections
@@ -318,16 +318,16 @@ func (h *httpProxy) transfer(dst, src net.Conn, direction string) {
 
 			_, writeErr := dst.Write(buffer[:n])
 			if writeErr != nil {
-				log.Printf("Transfer %s write error: %v (transferred %d bytes)", direction, writeErr, totalBytes)
+				slog.Error("Transfer write error", "direction", direction, "error", writeErr, "transferred_bytes", totalBytes)
 				return
 			}
 		}
 
 		if err != nil {
 			if err != io.EOF {
-				log.Printf("Transfer %s read error: %v (transferred %d bytes)", direction, err, totalBytes)
+				slog.Error("Transfer read error", "direction", direction, "error", err, "transferred_bytes", totalBytes)
 			} else {
-				log.Printf("Transfer %s completed: %d bytes", direction, totalBytes)
+				slog.Debug("Transfer completed", "direction", direction, "transferred_bytes", totalBytes)
 			}
 			return
 		}

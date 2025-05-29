@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 
 	"github.com/buhuipao/anyproxy/pkg/config"
@@ -34,7 +35,6 @@ func NewSOCKS5Proxy(cfg *config.SOCKS5Config, dialFunc ProxyDialer) (GatewayProx
 		socks5.WithAuthMethods(socks5Auths),
 		socks5.WithDial(dialFunc),
 		socks5.WithLogger(socks5.NewLogger(log.Default())),
-		// socks5.WithResolver(&ForwardDNSResolver{}),
 	)
 
 	return &socks5Proxy{
@@ -56,9 +56,9 @@ func (s *socks5Proxy) Start() error {
 
 	// Start SOCKS5 server in a separate goroutine
 	go func() {
-		log.Printf("Starting SOCKS5 server on %s", s.listenAddr)
+		slog.Info("Starting SOCKS5 server", "listen_addr", s.listenAddr)
 		if err := s.server.Serve(listener); err != nil {
-			log.Printf("SOCKS5 server error: %v", err)
+			slog.Error("SOCKS5 server error", "error", err)
 		}
 	}()
 
@@ -68,7 +68,7 @@ func (s *socks5Proxy) Start() error {
 // Stop stops the SOCKS5 server
 func (s *socks5Proxy) Stop() error {
 	if s.listener != nil {
-		log.Printf("Stopping SOCKS5 server on %s", s.listenAddr)
+		slog.Info("Stopping SOCKS5 server", "listen_addr", s.listenAddr)
 		return s.listener.Close()
 	}
 	return nil
@@ -86,18 +86,3 @@ func (s *socks5Proxy) DialConn(network, addr string) (net.Conn, error) {
 func (s *socks5Proxy) SetListenAddr(addr string) {
 	s.listenAddr = addr
 }
-
-/*
-type ForwardDNSResolver struct {
-	resolver *net.Resolver
-}
-
-func (r *ForwardDNSResolver) Resolve(ctx context.Context, name string) (context.Context, net.IP, error) {
-	ips, err := r.resolver.LookupIP(ctx, "ip", name)
-	if err != nil {
-		return ctx, nil, err
-	}
-
-	return ctx, ips[0], nil
-}
-*/

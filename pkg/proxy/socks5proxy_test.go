@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,6 +149,51 @@ func TestSOCKS5Proxy_InterfaceCompliance(t *testing.T) {
 
 	// Verify that socks5Proxy implements GatewayProxy interface
 	var _ GatewayProxy = proxy
+}
+
+// TestSOCKS5Proxy_ClientSideDNSResolution tests that domain names are passed to the client for resolution
+func TestSOCKS5Proxy_ClientSideDNSResolution(t *testing.T) {
+	// Track what addresses are passed to the dial function
+	var dialedAddresses []string
+
+	// Create a dial function that records the addresses it receives
+	recordingDialer := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialedAddresses = append(dialedAddresses, addr)
+		return &mockConn{}, nil
+	}
+
+	config := &config.SOCKS5Config{
+		AuthUsername: "testuser",
+		AuthPassword: "testpass",
+	}
+
+	proxy, err := NewSOCKS5Proxy(config, recordingDialer)
+	require.NoError(t, err)
+
+	// Test with domain name
+	_, err = proxy.DialConn("tcp", "example.com:80")
+	require.NoError(t, err)
+
+	// Test with IP address
+	_, err = proxy.DialConn("tcp", "192.168.1.1:80")
+	require.NoError(t, err)
+
+	// Verify that both domain name and IP address were passed through
+	require.Len(t, dialedAddresses, 2)
+
+	// The domain name should be passed as-is (client-side resolution)
+	assert.Contains(t, dialedAddresses, "example.com:80")
+
+	// The IP address should also be passed as-is
+	assert.Contains(t, dialedAddresses, "192.168.1.1:80")
+
+	// Verify that domain names are not resolved to IPs on the server side
+	for _, addr := range dialedAddresses {
+		if strings.Contains(addr, "example.com") {
+			// This confirms that the domain name was passed through without resolution
+			assert.True(t, strings.HasPrefix(addr, "example.com:"))
+		}
+	}
 }
 
 // Helper functions for testing

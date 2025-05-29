@@ -1,91 +1,91 @@
-# AnyProxy 部署指南
+# AnyProxy Deployment Guide
 
-## 概述
+## Overview
 
-本文档提供了 AnyProxy 在生产环境中的部署指南，包括系统要求、安装步骤、配置优化和运维建议。
+This document provides a deployment guide for AnyProxy in production environments, including system requirements, installation steps, configuration optimization, and operational recommendations.
 
-## 系统要求
+## System Requirements
 
-### 硬件要求
+### Hardware Requirements
 
-#### 网关服务器
-- **CPU**: 2核心以上
-- **内存**: 2GB 以上
-- **网络**: 公网IP，带宽根据预期流量确定
-- **存储**: 10GB 以上可用空间
+#### Gateway Server
+- **CPU**: 2+ cores
+- **Memory**: 2GB+
+- **Network**: Public IP, bandwidth determined by expected traffic
+- **Storage**: 10GB+ available space
 
-#### 客户端服务器
-- **CPU**: 1核心以上
-- **内存**: 1GB 以上
-- **网络**: 能够访问网关服务器
-- **存储**: 5GB 以上可用空间
+#### Client Server
+- **CPU**: 1+ core
+- **Memory**: 1GB+
+- **Network**: Able to access gateway server
+- **Storage**: 5GB+ available space
 
-### 软件要求
+### Software Requirements
 
-- **操作系统**: Linux (Ubuntu 20.04+, CentOS 7+, RHEL 8+)
-- **Go**: 1.21 或更高版本
-- **OpenSSL**: 用于生成 TLS 证书
-- **防火墙**: 配置相应端口开放
+- **Operating System**: Linux (Ubuntu 20.04+, CentOS 7+, RHEL 8+)
+- **Go**: 1.21 or higher
+- **OpenSSL**: For generating TLS certificates
+- **Firewall**: Configure appropriate port openings
 
-## 部署架构
+## Deployment Architecture
 
-### 单节点部署
+### Single Node Deployment
 
 ```
 Internet ──→ [Gateway + SOCKS5] ──→ [Client] ──→ Internal Services
 ```
 
-适用于：
-- 小规模部署
-- 测试环境
-- 个人使用
+Suitable for:
+- Small-scale deployments
+- Test environments
+- Personal use
 
-### 分布式部署
+### Distributed Deployment
 
 ```
 Internet ──→ [Load Balancer] ──→ [Gateway Cluster] ──→ [Client Cluster] ──→ Internal Services
 ```
 
-适用于：
-- 生产环境
-- 高可用需求
-- 大规模部署
+Suitable for:
+- Production environments
+- High availability requirements
+- Large-scale deployments
 
-## 安装步骤
+## Installation Steps
 
-### 1. 准备环境
+### 1. Environment Preparation
 
 ```bash
-# 更新系统
+# Update system
 sudo apt update && sudo apt upgrade -y
 
-# 安装必要工具
+# Install necessary tools
 sudo apt install -y git build-essential openssl
 
-# 安装 Go (如果未安装)
+# Install Go (if not installed)
 wget https://go.dev/dl/go1.21.0.linux-amd64.tar.gz
 sudo tar -C /usr/local -xzf go1.21.0.linux-amd64.tar.gz
 echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-### 2. 下载和构建
+### 2. Download and Build
 
 ```bash
-# 克隆项目
+# Clone project
 git clone https://github.com/buhuipao/anyproxy.git
 cd anyproxy
 
-# 构建项目
+# Build project
 make build
 
-# 生成证书
+# Generate certificates
 make certs
 ```
 
-### 3. 配置文件
+### 3. Configuration Files
 
-#### 生产环境配置示例
+#### Production Environment Configuration Example
 
 ```yaml
 # configs/production.yaml
@@ -125,40 +125,40 @@ client:
       protocol: "tcp"
 ```
 
-### 4. 证书配置
+### 4. Certificate Configuration
 
-#### 使用 Let's Encrypt 证书
+#### Using Let's Encrypt Certificates
 
 ```bash
-# 安装 certbot
+# Install certbot
 sudo apt install -y certbot
 
-# 获取证书
+# Obtain certificate
 sudo certbot certonly --standalone -d your-domain.com
 
-# 复制证书到项目目录
+# Copy certificate to project directory
 sudo cp /etc/letsencrypt/live/your-domain.com/fullchain.pem /etc/anyproxy/certs/server.crt
 sudo cp /etc/letsencrypt/live/your-domain.com/privkey.pem /etc/anyproxy/certs/server.key
 sudo chown anyproxy:anyproxy /etc/anyproxy/certs/*
 ```
 
-#### 使用自签名证书
+#### Using Self-Signed Certificates
 
 ```bash
-# 生成自签名证书
+# Generate self-signed certificate
 bash generate_certs.sh your-domain.com
 
-# 移动证书到系统目录
+# Move certificates to system directory
 sudo mkdir -p /etc/anyproxy/certs
 sudo cp certs/* /etc/anyproxy/certs/
 ```
 
-## 系统服务配置
+## System Service Configuration
 
-### 1. 创建系统用户
+### 1. Create System User
 
 ```bash
-# 创建专用用户
+# Create dedicated user
 sudo useradd -r -s /bin/false anyproxy
 sudo mkdir -p /opt/anyproxy
 sudo mkdir -p /etc/anyproxy
@@ -166,24 +166,24 @@ sudo mkdir -p /var/log/anyproxy
 sudo chown -R anyproxy:anyproxy /opt/anyproxy /etc/anyproxy /var/log/anyproxy
 ```
 
-### 2. 安装二进制文件
+### 2. Install Binary Files
 
 ```bash
-# 复制二进制文件
+# Copy binary files
 sudo cp bin/anyproxy-gateway /opt/anyproxy/
 sudo cp bin/anyproxy-client /opt/anyproxy/
 sudo chmod +x /opt/anyproxy/*
 
-# 复制配置文件
+# Copy configuration files
 sudo cp configs/production.yaml /etc/anyproxy/config.yaml
 ```
 
-### 3. 创建 systemd 服务
+### 3. Create systemd Services
 
-#### 网关服务
+#### Gateway Service
 
 ```bash
-# 创建网关服务文件
+# Create gateway service file
 sudo tee /etc/systemd/system/anyproxy-gateway.service > /dev/null <<EOF
 [Unit]
 Description=AnyProxy Gateway
@@ -200,7 +200,7 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=anyproxy-gateway
 
-# 安全设置
+# Security settings
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
@@ -212,10 +212,10 @@ WantedBy=multi-user.target
 EOF
 ```
 
-#### 客户端服务
+#### Client Service
 
 ```bash
-# 创建客户端服务文件
+# Create client service file
 sudo tee /etc/systemd/system/anyproxy-client.service > /dev/null <<EOF
 [Unit]
 Description=AnyProxy Client
@@ -232,7 +232,7 @@ StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=anyproxy-client
 
-# 安全设置
+# Security settings
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
@@ -244,49 +244,49 @@ WantedBy=multi-user.target
 EOF
 ```
 
-### 4. 启动服务
+### 4. Start Services
 
 ```bash
-# 重新加载 systemd
+# Reload systemd
 sudo systemctl daemon-reload
 
-# 启动并启用服务
+# Start and enable services
 sudo systemctl enable anyproxy-gateway
 sudo systemctl start anyproxy-gateway
 
 sudo systemctl enable anyproxy-client
 sudo systemctl start anyproxy-client
 
-# 检查服务状态
+# Check service status
 sudo systemctl status anyproxy-gateway
 sudo systemctl status anyproxy-client
 ```
 
-## 防火墙配置
+## Firewall Configuration
 
 ### UFW (Ubuntu)
 
 ```bash
-# 允许网关端口
+# Allow gateway ports
 sudo ufw allow 8443/tcp comment 'AnyProxy Gateway'
 sudo ufw allow 1080/tcp comment 'SOCKS5 Proxy'
 
-# 启用防火墙
+# Enable firewall
 sudo ufw enable
 ```
 
 ### firewalld (CentOS/RHEL)
 
 ```bash
-# 允许网关端口
+# Allow gateway ports
 sudo firewall-cmd --permanent --add-port=8443/tcp
 sudo firewall-cmd --permanent --add-port=1080/tcp
 sudo firewall-cmd --reload
 ```
 
-## 负载均衡配置
+## Load Balancer Configuration
 
-### Nginx 负载均衡
+### Nginx Load Balancing
 
 ```nginx
 # /etc/nginx/sites-available/anyproxy
@@ -316,26 +316,26 @@ server {
 }
 ```
 
-## 监控和日志
+## Monitoring and Logging
 
-### 1. 日志配置
+### 1. Log Configuration
 
 ```bash
-# 配置 rsyslog
+# Configure rsyslog
 sudo tee /etc/rsyslog.d/anyproxy.conf > /dev/null <<EOF
 if \$programname == 'anyproxy-gateway' then /var/log/anyproxy/gateway.log
 if \$programname == 'anyproxy-client' then /var/log/anyproxy/client.log
 & stop
 EOF
 
-# 重启 rsyslog
+# Restart rsyslog
 sudo systemctl restart rsyslog
 ```
 
-### 2. 日志轮转
+### 2. Log Rotation
 
 ```bash
-# 配置 logrotate
+# Configure logrotate
 sudo tee /etc/logrotate.d/anyproxy > /dev/null <<EOF
 /var/log/anyproxy/*.log {
     daily
@@ -352,13 +352,13 @@ sudo tee /etc/logrotate.d/anyproxy > /dev/null <<EOF
 EOF
 ```
 
-### 3. 监控脚本
+### 3. Monitoring Script
 
 ```bash
 #!/bin/bash
 # /opt/anyproxy/monitor.sh
 
-# 检查服务状态
+# Check service status
 check_service() {
     local service=$1
     if ! systemctl is-active --quiet $service; then
@@ -378,150 +378,283 @@ check_service anyproxy-client
 ```
 
 ```bash
-# 添加到 crontab
+# Add to crontab
 echo "*/5 * * * * /opt/anyproxy/monitor.sh >> /var/log/anyproxy/monitor.log 2>&1" | sudo crontab -u anyproxy -
 ```
 
-## 性能优化
+## Performance Optimization
 
-### 1. 系统参数调优
+### 1. System Parameter Tuning
 
 ```bash
-# 增加文件描述符限制
+# Increase file descriptor limits
 echo "anyproxy soft nofile 65536" | sudo tee -a /etc/security/limits.conf
 echo "anyproxy hard nofile 65536" | sudo tee -a /etc/security/limits.conf
 
-# 网络参数优化
+# Network parameter optimization
 sudo tee -a /etc/sysctl.conf > /dev/null <<EOF
-# 增加网络缓冲区
+# Increase network buffers
 net.core.rmem_max = 16777216
 net.core.wmem_max = 16777216
 net.ipv4.tcp_rmem = 4096 87380 16777216
 net.ipv4.tcp_wmem = 4096 65536 16777216
 
-# 增加连接跟踪表大小
+# Increase connection tracking table size
 net.netfilter.nf_conntrack_max = 1048576
 
-# 启用 TCP 窗口缩放
+# Enable TCP window scaling
 net.ipv4.tcp_window_scaling = 1
 EOF
 
 sudo sysctl -p
 ```
 
-### 2. 应用配置优化
+### 2. Application Configuration Optimization
 
 ```yaml
-# 高性能配置示例
+# High performance configuration example
 client:
   replicas: 5
   max_concurrent_conns: 2000
-  # 其他配置...
+  # Other configurations...
 ```
 
-## 安全加固
+## Security Hardening
 
-### 1. 系统安全
+### 1. System Security
 
 ```bash
-# 禁用不必要的服务
+# Disable unnecessary services
 sudo systemctl disable apache2 nginx mysql
 
-# 更新系统
+# Update system
 sudo apt update && sudo apt upgrade -y
 
-# 安装安全更新
+# Install security updates
 sudo unattended-upgrades
 ```
 
-### 2. 网络安全
+### 2. Network Security
 
 ```bash
-# 限制 SSH 访问
+# Restrict SSH access
 sudo sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
 sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
 sudo systemctl restart ssh
 ```
 
-### 3. 应用安全
+### 3. Application Security
 
-- 使用强密码
-- 定期更换认证凭据
-- 启用访问日志
-- 配置适当的访问控制列表
+- Use strong passwords
+- Regularly rotate authentication credentials
+- Enable access logging
+- Configure appropriate access control lists
 
-## 故障排除
+## Troubleshooting
 
-### 常见问题
+### Common Issues
 
-1. **连接被拒绝**
-   - 检查防火墙设置
-   - 验证服务是否运行
-   - 检查端口是否被占用
+1. **Connection Refused**
+   - Check firewall settings
+   - Verify services are running
+   - Check if ports are occupied
 
-2. **TLS 握手失败**
-   - 验证证书有效性
-   - 检查证书路径
-   - 确认时间同步
+2. **TLS Handshake Failure**
+   - Verify certificate validity
+   - Check certificate paths
+   - Ensure time synchronization
 
-3. **认证失败**
-   - 检查用户名密码
-   - 验证配置文件
-   - 查看认证日志
+3. **Authentication Failure**
+   - Check username and password
+   - Verify configuration files
+   - Review authentication logs
 
-### 日志分析
+### Log Analysis
 
 ```bash
-# 查看实时日志
+# View real-time logs
 sudo journalctl -u anyproxy-gateway -f
 sudo journalctl -u anyproxy-client -f
 
-# 查看错误日志
+# View error logs
 sudo journalctl -u anyproxy-gateway --since "1 hour ago" | grep ERROR
 ```
 
-## 备份和恢复
+## Backup and Recovery
 
-### 备份
+### Backup
 
 ```bash
 #!/bin/bash
-# 备份脚本
+# Backup script
 BACKUP_DIR="/backup/anyproxy/$(date +%Y%m%d)"
 mkdir -p $BACKUP_DIR
 
-# 备份配置文件
+# Backup configuration files
 cp -r /etc/anyproxy $BACKUP_DIR/
 cp -r /opt/anyproxy $BACKUP_DIR/
 
-# 备份证书
+# Backup certificates
 cp -r /etc/anyproxy/certs $BACKUP_DIR/
 
-# 创建压缩包
+# Create compressed archive
 tar -czf $BACKUP_DIR.tar.gz -C /backup/anyproxy $(basename $BACKUP_DIR)
 ```
 
-### 恢复
+### Recovery
 
 ```bash
 #!/bin/bash
-# 恢复脚本
-BACKUP_FILE=$1
+# Recovery script
+BACKUP_FILE="/backup/anyproxy/20240115.tar.gz"
 
-if [ -z "$BACKUP_FILE" ]; then
-    echo "Usage: $0 <backup_file.tar.gz>"
-    exit 1
-fi
-
-# 停止服务
+# Stop services
 sudo systemctl stop anyproxy-gateway anyproxy-client
 
-# 恢复文件
-sudo tar -xzf $BACKUP_FILE -C /
+# Extract backup
+tar -xzf $BACKUP_FILE -C /tmp/
 
-# 设置权限
+# Restore files
+sudo cp -r /tmp/anyproxy/* /etc/anyproxy/
+sudo cp -r /tmp/anyproxy/* /opt/anyproxy/
+
+# Set permissions
 sudo chown -R anyproxy:anyproxy /etc/anyproxy /opt/anyproxy
 
-# 启动服务
+# Start services
 sudo systemctl start anyproxy-gateway anyproxy-client
+```
+
+## High Availability Setup
+
+### 1. Database Clustering (if applicable)
+
+```bash
+# For future database requirements
+# Configure database replication
+# Set up failover mechanisms
+```
+
+### 2. Gateway Clustering
+
+```yaml
+# Multiple gateway instances
+gateway_cluster:
+  - host: gateway1.example.com:8443
+  - host: gateway2.example.com:8443
+  - host: gateway3.example.com:8443
+```
+
+### 3. Health Checks
+
+```bash
+#!/bin/bash
+# Health check script
+check_health() {
+    local endpoint=$1
+    local response=$(curl -s -o /dev/null -w "%{http_code}" $endpoint)
+    if [ "$response" = "200" ]; then
+        echo "OK"
+    else
+        echo "FAIL"
+    fi
+}
+
+# Check gateway health
+check_health "https://your-domain.com:8443/health"
+```
+
+## Maintenance Procedures
+
+### 1. Regular Updates
+
+```bash
+#!/bin/bash
+# Update script
+cd /opt/anyproxy/source
+git pull origin main
+make build
+
+# Stop services
+sudo systemctl stop anyproxy-gateway anyproxy-client
+
+# Update binaries
+sudo cp bin/* /opt/anyproxy/
+
+# Start services
+sudo systemctl start anyproxy-gateway anyproxy-client
+```
+
+### 2. Certificate Renewal
+
+```bash
+#!/bin/bash
+# Certificate renewal script
+sudo certbot renew --quiet
+
+# Copy new certificates
+sudo cp /etc/letsencrypt/live/your-domain.com/fullchain.pem /etc/anyproxy/certs/server.crt
+sudo cp /etc/letsencrypt/live/your-domain.com/privkey.pem /etc/anyproxy/certs/server.key
+
+# Restart services
+sudo systemctl restart anyproxy-gateway
+```
+
+### 3. Log Cleanup
+
+```bash
+#!/bin/bash
+# Log cleanup script
+find /var/log/anyproxy -name "*.log" -mtime +30 -delete
+find /var/log/anyproxy -name "*.gz" -mtime +90 -delete
+```
+
+## Monitoring Integration
+
+### 1. Prometheus Metrics
+
+```yaml
+# Add to configuration
+monitoring:
+  prometheus:
+    enabled: true
+    port: 9090
+    path: /metrics
+```
+
+### 2. Grafana Dashboard
+
+```json
+{
+  "dashboard": {
+    "title": "AnyProxy Monitoring",
+    "panels": [
+      {
+        "title": "Active Connections",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "anyproxy_active_connections"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### 3. Alerting Rules
+
+```yaml
+# Prometheus alerting rules
+groups:
+  - name: anyproxy
+    rules:
+      - alert: AnyProxyDown
+        expr: up{job="anyproxy"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "AnyProxy instance is down"
 ``` 

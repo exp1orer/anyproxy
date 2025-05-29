@@ -11,6 +11,20 @@ type Config struct {
 	Proxy   ProxyConfig   `yaml:"proxy"`
 	Gateway GatewayConfig `yaml:"gateway"`
 	Client  ClientConfig  `yaml:"client"`
+	Log     LogConfig     `yaml:"log"`
+}
+
+// LogConfig represents the logging configuration
+
+type LogConfig struct {
+	Level      string `yaml:"level"`       // debug, info, warn, error
+	Format     string `yaml:"format"`      // text, json
+	Output     string `yaml:"output"`      // stdout, stderr, file path
+	File       string `yaml:"file"`        // log file path when output is file
+	MaxSize    int    `yaml:"max_size"`    // maximum size in MB before rotation
+	MaxBackups int    `yaml:"max_backups"` // maximum number of old log files to retain
+	MaxAge     int    `yaml:"max_age"`     // maximum number of days to retain old log files
+	Compress   bool   `yaml:"compress"`    // whether to compress rotated log files
 }
 
 // ProxyConfig represents the configuration for the proxy
@@ -51,14 +65,14 @@ type ServiceLimit struct {
 
 // ClientConfig represents the configuration for the proxy client
 type ClientConfig struct {
-	GatewayAddr    string         `yaml:"gateway_addr"`
-	GatewayTLSCert string         `yaml:"gateway_tls_cert"`
-	ClientID       string         `yaml:"client_id"`
-	Replicas       int            `yaml:"replicas"`
-	AuthUsername   string         `yaml:"auth_username"`
-	AuthPassword   string         `yaml:"auth_password"`
-	ForbiddenHosts []string       `yaml:"forbidden_hosts"`
-	Limits         []ServiceLimit `yaml:"limit"`
+	GatewayAddr    string   `yaml:"gateway_addr"`
+	GatewayTLSCert string   `yaml:"gateway_tls_cert"`
+	ClientID       string   `yaml:"client_id"`
+	Replicas       int      `yaml:"replicas"`
+	AuthUsername   string   `yaml:"auth_username"`
+	AuthPassword   string   `yaml:"auth_password"`
+	ForbiddenHosts []string `yaml:"forbidden_hosts"`
+	AllowedHosts   []string `yaml:"allowed_hosts"`
 }
 
 var conf *Config

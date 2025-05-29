@@ -6,11 +6,12 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -63,13 +64,13 @@ func (c *ProxyClient) Start() error {
 
 // Stop stops the client gracefully
 func (c *ProxyClient) Stop() error {
-	log.Printf("Stopping client gracefully...")
+	slog.Info("Stopping client gracefully...")
 
 	// Step 1: Signal all goroutines to stop accepting new work
 	close(c.stopCh)
 
 	// Step 2: Give existing connections time to finish current operations
-	log.Printf("Waiting for active connections to finish...")
+	slog.Info("Waiting for active connections to finish...")
 	time.Sleep(500 * time.Millisecond)
 
 	// Step 3: Close WebSocket connection to stop receiving new requests
@@ -97,9 +98,9 @@ func (c *ProxyClient) Stop() error {
 
 	select {
 	case <-done:
-		log.Printf("All client goroutines finished gracefully")
+		slog.Info("All client goroutines finished gracefully")
 	case <-time.After(3 * time.Second):
-		log.Printf("Warning: timeout waiting for client goroutines to finish")
+		slog.Warn("Timeout waiting for client goroutines to finish")
 	}
 
 	return nil
@@ -119,7 +120,7 @@ func (c *ProxyClient) connectionLoop() {
 
 		// Attempt to connect
 		if err := c.connect(); err != nil {
-			log.Printf("Failed to connect to gateway: %v, retrying in %v", err, backoff)
+			slog.Error("Failed to connect to gateway", "error", err, "retrying_in", backoff)
 
 			// Wait before retry
 			select {
@@ -138,13 +139,13 @@ func (c *ProxyClient) connectionLoop() {
 
 		// Reset backoff on successful connection
 		backoff = 1 * time.Second
-		log.Printf("Successfully connected to gateway")
+		slog.Info("Successfully connected to gateway")
 
 		// Handle messages until connection fails
 		c.handleMessages()
 
 		// Connection lost, cleanup and retry
-		log.Printf("Connection to gateway lost, cleaning up and retrying...")
+		slog.Info("Connection to gateway lost, cleaning up and retrying...")
 		c.cleanup()
 	}
 }
@@ -261,14 +262,14 @@ func (c *ProxyClient) handleMessages() {
 		// Read message from gateway
 		var msg map[string]interface{}
 		if err := c.wsConn.ReadJSON(&msg); err != nil {
-			log.Printf("WebSocket read error: %v", err)
+			slog.Error("WebSocket read error", "error", err)
 			return
 		}
 
 		// Process message based on its type
 		msgType, ok := msg["type"].(string)
 		if !ok {
-			log.Printf("Invalid message format from gateway")
+			slog.Error("Invalid message format from gateway")
 			continue
 		}
 
@@ -277,7 +278,7 @@ func (c *ProxyClient) handleMessages() {
 			// Route all messages to per-connection channels
 			c.routeMessage(msg)
 		default:
-			log.Printf("Unknown message type: %s", msgType)
+			slog.Warn("Unknown message type", "type", msgType)
 		}
 	}
 }
@@ -286,7 +287,7 @@ func (c *ProxyClient) handleMessages() {
 func (c *ProxyClient) routeMessage(msg map[string]interface{}) {
 	connID, ok := msg["id"].(string)
 	if !ok {
-		log.Printf("Invalid connection ID in message")
+		slog.Error("Invalid connection ID in message")
 		return
 	}
 
@@ -310,7 +311,7 @@ func (c *ProxyClient) routeMessage(msg map[string]interface{}) {
 	select {
 	case msgChan <- msg:
 	default:
-		log.Printf("Message channel full for connection %s, dropping message", connID)
+		slog.Warn("Message channel full for connection, dropping message", "conn_id", connID)
 	}
 }
 
@@ -360,27 +361,27 @@ func (c *ProxyClient) handleConnectMessage(msg map[string]interface{}) {
 	// Extract connection information
 	connID, ok := msg["id"].(string)
 	if !ok {
-		log.Printf("Invalid connection ID in connect message")
+		slog.Error("Invalid connection ID in connect message")
 		return
 	}
 
 	network, ok := msg["network"].(string)
 	if !ok {
-		log.Printf("Invalid network in connect message")
+		slog.Error("Invalid network in connect message")
 		return
 	}
 
 	address, ok := msg["address"].(string)
 	if !ok {
-		log.Printf("Invalid address in connect message")
+		slog.Error("Invalid address in connect message")
 		return
 	}
 
-	log.Printf("Handling connect request %s to %s://%s", connID, network, address)
+	slog.Info("Handling connect request", "conn_id", connID, "network", network, "address", address)
 
 	// Check if the connection is allowed
 	if !c.isConnectionAllowed(address) {
-		log.Printf("Connection to %s denied (forbidden host)", address)
+		slog.Warn("Connection denied (forbidden host)", "address", address)
 		c.sendConnectResponse(connID, false, "Host is forbidden")
 		return
 	}
@@ -388,12 +389,12 @@ func (c *ProxyClient) handleConnectMessage(msg map[string]interface{}) {
 	// Establish connection to the target
 	conn, err := net.DialTimeout(network, address, 30*time.Second)
 	if err != nil {
-		log.Printf("Failed to connect to %s: %v", address, err)
+		slog.Error("Failed to connect", "address", address, "error", err)
 		c.sendConnectResponse(connID, false, err.Error())
 		return
 	}
 
-	log.Printf("Successfully connected to %s for connection %s", address, connID)
+	slog.Info("Successfully connected", "address", address, "conn_id", connID)
 
 	// Register the connection
 	c.connsMu.Lock()
@@ -402,7 +403,7 @@ func (c *ProxyClient) handleConnectMessage(msg map[string]interface{}) {
 
 	// Send success response
 	if err := c.sendConnectResponse(connID, true, ""); err != nil {
-		log.Printf("Error sending connect_response: %v", err)
+		slog.Error("Error sending connect_response", "conn_id", connID, "error", err)
 		c.cleanupConnection(connID)
 		return
 	}
@@ -432,14 +433,14 @@ func (c *ProxyClient) sendConnectResponse(connID string, success bool, errorMsg 
 
 // handleConnection reads from the target connection and sends data to gateway
 func (c *ProxyClient) handleConnection(connID string) {
-	log.Printf("Starting to handle connection %s", connID)
+	slog.Debug("Starting to handle connection", "conn_id", connID)
 
 	// Get the connection
 	c.connsMu.RLock()
 	conn, ok := c.conns[connID]
 	c.connsMu.RUnlock()
 	if !ok {
-		log.Printf("Unknown connection ID: %s", connID)
+		slog.Warn("Unknown connection ID", "conn_id", connID)
 		return
 	}
 
@@ -449,7 +450,7 @@ func (c *ProxyClient) handleConnection(connID string) {
 	for {
 		select {
 		case <-c.stopCh:
-			log.Printf("Client stopping, exiting connection handler %s", connID)
+			slog.Debug("Client stopping, exiting connection handler", "conn_id", connID)
 			return
 		default:
 		}
@@ -468,7 +469,7 @@ func (c *ProxyClient) handleConnection(connID string) {
 				"data": encodedData,
 			})
 			if writeErr != nil {
-				log.Printf("Error writing data to WebSocket for connection %s: %v", connID, writeErr)
+				slog.Error("Error writing data to WebSocket", "conn_id", connID, "error", writeErr)
 				c.cleanupConnection(connID)
 				return
 			}
@@ -480,7 +481,7 @@ func (c *ProxyClient) handleConnection(connID string) {
 			}
 
 			if err != io.EOF {
-				log.Printf("Failed to read from connection %s: %v", connID, err)
+				slog.Error("Failed to read from connection", "conn_id", connID, "error", err)
 			}
 
 			// Send close message to gateway
@@ -503,12 +504,32 @@ func (c *ProxyClient) isConnectionAllowed(address string) bool {
 	}
 
 	for _, forbidden := range c.config.ForbiddenHosts {
+		re := regexp.MustCompile(forbidden)
+		if re.MatchString(host) {
+			return false
+		}
+
 		if strings.HasSuffix(host, forbidden) {
 			return false
 		}
 	}
 
-	return true
+	if len(c.config.AllowedHosts) == 0 {
+		return true
+	}
+
+	for _, allowed := range c.config.AllowedHosts {
+		re := regexp.MustCompile(allowed)
+		if re.MatchString(host) {
+			return true
+		}
+
+		if strings.HasSuffix(host, allowed) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // handleDataMessage processes a data message from the gateway
@@ -516,20 +537,20 @@ func (c *ProxyClient) handleDataMessage(msg map[string]interface{}) {
 	// Extract message information
 	connID, ok := msg["id"].(string)
 	if !ok {
-		log.Printf("Invalid connection ID in data message")
+		slog.Error("Invalid connection ID in data message")
 		return
 	}
 
 	dataStr, ok := msg["data"].(string)
 	if !ok {
-		log.Printf("Invalid data in data message for connection %s", connID)
+		slog.Error("Invalid data in data message", "conn_id", connID)
 		return
 	}
 
 	// Decode base64 string back to []byte
 	data, err := base64.StdEncoding.DecodeString(dataStr)
 	if err != nil {
-		log.Printf("Failed to decode base64 data for connection %s: %v", connID, err)
+		slog.Error("Failed to decode base64 data", "conn_id", connID, "error", err)
 		return
 	}
 
@@ -538,14 +559,14 @@ func (c *ProxyClient) handleDataMessage(msg map[string]interface{}) {
 	conn, ok := c.conns[connID]
 	c.connsMu.RUnlock()
 	if !ok {
-		log.Printf("Unknown connection ID: %s", connID)
+		slog.Warn("Unknown connection ID", "conn_id", connID)
 		return
 	}
 
 	// Write data to the connection
 	_, err = conn.Write(data)
 	if err != nil {
-		log.Printf("Failed to write data to connection %s: %v", connID, err)
+		slog.Error("Failed to write data to connection", "conn_id", connID, "error", err)
 		c.cleanupConnection(connID)
 		return
 	}
@@ -555,7 +576,7 @@ func (c *ProxyClient) handleDataMessage(msg map[string]interface{}) {
 func (c *ProxyClient) handleCloseMessage(msg map[string]interface{}) {
 	connID, ok := msg["id"].(string)
 	if !ok {
-		log.Printf("Invalid connection ID in close message")
+		slog.Error("Invalid connection ID in close message")
 		return
 	}
 
@@ -581,6 +602,6 @@ func (c *ProxyClient) cleanupConnection(connID string) {
 
 	if exists && conn != nil {
 		conn.Close()
-		log.Printf("Connection %s cleaned up", connID)
+		slog.Debug("Connection cleaned up", "conn_id", connID)
 	}
 }

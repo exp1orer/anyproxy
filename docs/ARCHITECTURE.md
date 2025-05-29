@@ -1,21 +1,21 @@
-# AnyProxy 架构设计
+# AnyProxy Architecture Design
 
-## 概述
+## Overview
 
-AnyProxy 是一个基于 WebSocket + TLS 的反向代理系统，旨在安全地将内网服务暴露给公网用户。系统采用客户端主动连接的方式，避免了传统端口转发的安全风险。支持同时运行 HTTP/HTTPS 和 SOCKS5 代理服务。
+AnyProxy is a reverse proxy system based on WebSocket + TLS, designed to securely expose internal services to public users. The system uses a client-initiated connection approach, avoiding the security risks of traditional port forwarding. It supports running both HTTP/HTTPS and SOCKS5 proxy services simultaneously.
 
-## 系统架构
+## System Architecture
 
-### 整体架构
+### Overall Architecture
 
 ```
 ┌─────────────┐  HTTP/SOCKS5  ┌─────────────┐    WebSocket+TLS    ┌─────────────┐    TCP/UDP    ┌─────────────┐
-│ 公网用户     │ ──────────────→ │ 网关(Gateway) │ ──────────────────→ │ 客户端(Client) │ ──────────────→ │ 目标服务     │
+│ Public Users │ ──────────────→ │   Gateway   │ ──────────────────→ │   Client    │ ──────────────→ │ Target Service │
 │ (Internet)  │               │             │                    │             │               │ (LAN/WAN)   │
 └─────────────┘               └─────────────┘                    └─────────────┘               └─────────────┘
 ```
 
-### 双代理架构
+### Dual Proxy Architecture
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
@@ -29,92 +29,92 @@ AnyProxy 是一个基于 WebSocket + TLS 的反向代理系统，旨在安全地
                                                └─────────────────┘
 ```
 
-## 核心组件
+## Core Components
 
-### 1. 网关 (Gateway)
+### 1. Gateway
 
-网关是系统的核心组件，负责：
+The gateway is the core component of the system, responsible for:
 
-- **HTTP/HTTPS 代理服务**: 监听公网用户的 HTTP 代理连接请求
-- **SOCKS5 代理服务**: 监听公网用户的 SOCKS5 连接请求
-- **WebSocket 服务器**: 接受客户端的 WebSocket 连接
-- **请求路由**: 将公网用户的请求路由到合适的客户端
-- **负载均衡**: 在多个客户端之间分发请求
-- **认证授权**: 验证客户端和用户的身份
+- **HTTP/HTTPS Proxy Service**: Listens for HTTP proxy connection requests from public users
+- **SOCKS5 Proxy Service**: Listens for SOCKS5 connection requests from public users
+- **WebSocket Server**: Accepts WebSocket connections from clients
+- **Request Routing**: Routes public user requests to appropriate clients
+- **Load Balancing**: Distributes requests among multiple clients
+- **Authentication & Authorization**: Verifies client and user identities
 
-#### 主要功能模块
+#### Main Functional Modules
 
 ```go
 type Gateway struct {
-    httpServer      *http.Server        // WebSocket 服务器
-    proxies         []GatewayProxy      // 代理服务器列表 (HTTP + SOCKS5)
-    clientManager   *ClientManager      // 客户端连接管理器
+    httpServer      *http.Server        // WebSocket server
+    proxies         []GatewayProxy      // Proxy server list (HTTP + SOCKS5)
+    clientManager   *ClientManager      // Client connection manager
     config          *config.GatewayConfig
 }
 ```
 
-#### 工作流程
+#### Workflow
 
-1. 根据配置启动 HTTP 和/或 SOCKS5 代理服务，监听公网用户连接
-2. 启动 WebSocket 服务器，等待客户端连接
-3. 当客户端连接时，进行 TLS 握手和身份验证
-4. 当公网用户发起代理请求时，选择一个可用客户端
-5. 通过 WebSocket 将请求转发给客户端
-6. 将客户端的响应返回给公网用户
+1. Start HTTP and/or SOCKS5 proxy services based on configuration, listening for public user connections
+2. Start WebSocket server, waiting for client connections
+3. When clients connect, perform TLS handshake and authentication
+4. When public users initiate proxy requests, select an available client
+5. Forward requests to clients via WebSocket
+6. Return client responses to public users
 
-#### 双代理支持
+#### Dual Proxy Support
 
-网关现在支持同时运行多种代理类型：
+The gateway now supports running multiple proxy types simultaneously:
 
-**HTTP/HTTPS 代理**:
-- 支持标准 HTTP 代理协议
-- 支持 CONNECT 方法用于 HTTPS 隧道
-- 支持基本认证 (Basic Authentication)
-- 处理 HTTP 请求头和响应头
+**HTTP/HTTPS Proxy**:
+- Supports standard HTTP proxy protocol
+- Supports CONNECT method for HTTPS tunneling
+- Supports Basic Authentication
+- Handles HTTP request and response headers
 
-**SOCKS5 代理**:
-- 支持 SOCKS5 协议标准
-- 支持用户名/密码认证
-- 支持 TCP 和 UDP 连接
-- 兼容各种 SOCKS5 客户端
+**SOCKS5 Proxy**:
+- Supports SOCKS5 protocol standard
+- Supports username/password authentication
+- Supports TCP and UDP connections
+- Compatible with various SOCKS5 clients
 
-**配置灵活性**:
-- 可以同时启动两种代理
-- 可以只启动其中一种代理
-- 每种代理有独立的监听端口和认证配置
-- 共享相同的客户端连接池
+**Configuration Flexibility**:
+- Can start both proxy types simultaneously
+- Can start only one proxy type
+- Each proxy type has independent listening ports and authentication configuration
+- Shares the same client connection pool
 
-### 2. 客户端 (Client)
+### 2. Client
 
-客户端运行在内网环境中，负责：
+The client runs in the internal network environment, responsible for:
 
-- **主动连接**: 主动连接到网关的 WebSocket 服务器
-- **请求处理**: 接收网关转发的请求并处理
-- **服务访问**: 访问内网或公网的目标服务
-- **访问控制**: 根据配置限制可访问的服务
+- **Proactive Connection**: Proactively connects to the gateway's WebSocket server
+- **Request Processing**: Receives and processes requests forwarded by the gateway
+- **Service Access**: Accesses target services in internal or public networks
+- **Access Control**: Restricts accessible services based on configuration
 
-#### 主要功能模块
+#### Main Functional Modules
 
 ```go
 type ProxyClient struct {
-    wsConn          *websocket.Conn     // WebSocket 连接
-    connManager     *ConnectionManager  // 连接管理器
+    wsConn          *websocket.Conn     // WebSocket connection
+    connManager     *ConnectionManager  // Connection manager
     config          *config.ClientConfig
 }
 ```
 
-#### 工作流程
+#### Workflow
 
-1. 建立到网关的 WebSocket + TLS 连接
-2. 进行身份验证
-3. 监听网关发送的代理请求
-4. 对每个请求建立到目标服务的连接
-5. 在网关和目标服务之间转发数据
-6. 处理连接关闭和错误情况
+1. Establish WebSocket + TLS connection to the gateway
+2. Perform authentication
+3. Listen for proxy requests sent by the gateway
+4. Establish connections to target services for each request
+5. Forward data between gateway and target services
+6. Handle connection closures and error conditions
 
-### 3. 连接管理
+### 3. Connection Management
 
-#### 连接包装器 (ConnectionWrapper)
+#### Connection Wrapper
 
 ```go
 type ConnectionWrapper struct {
@@ -125,12 +125,12 @@ type ConnectionWrapper struct {
 }
 ```
 
-负责：
-- 连接生命周期管理
-- 连接状态跟踪
-- 超时处理
+Responsible for:
+- Connection lifecycle management
+- Connection state tracking
+- Timeout handling
 
-#### WebSocket 写入器 (WebSocketWriter)
+#### WebSocket Writer
 
 ```go
 type WebSocketWriter struct {
@@ -140,14 +140,14 @@ type WebSocketWriter struct {
 }
 ```
 
-负责：
-- WebSocket 消息的安全写入
-- 并发写入控制
-- 错误处理
+Responsible for:
+- Safe WebSocket message writing
+- Concurrent write control
+- Error handling
 
-## 数据流
+## Data Flow
 
-### 1. 客户端注册流程
+### 1. Client Registration Flow
 
 ```
 Client                    Gateway
@@ -163,9 +163,9 @@ Client                    Gateway
   │──── Keep Alive ─────────→│
 ```
 
-### 2. 代理请求流程
+### 2. Proxy Request Flow
 
-#### HTTP 代理请求流程
+#### HTTP Proxy Request Flow
 
 ```
 User          Gateway         Client          Target
@@ -178,7 +178,7 @@ User          Gateway         Client          Target
   │←─ HTTP ──────│              │              │
 ```
 
-#### SOCKS5 代理请求流程
+#### SOCKS5 Proxy Request Flow
 
 ```
 User          Gateway         Client          Target
@@ -191,31 +191,31 @@ User          Gateway         Client          Target
   │←─ SOCKS5 ────│              │              │
 ```
 
-## 安全机制
+## Security Mechanisms
 
-### 1. 传输安全
+### 1. Transport Security
 
-- **TLS 加密**: 所有 WebSocket 连接使用 TLS 1.2+ 加密
-- **证书验证**: 客户端验证网关的 TLS 证书
-- **双向认证**: 支持客户端证书认证（可选）
+- **TLS Encryption**: All WebSocket connections use TLS 1.2+ encryption
+- **Certificate Verification**: Clients verify the gateway's TLS certificate
+- **Mutual Authentication**: Supports client certificate authentication (optional)
 
-### 2. 身份认证
+### 2. Identity Authentication
 
-- **用户名密码**: 基于用户名密码的认证机制
-- **HTTP 代理认证**: 支持 HTTP 代理的基本认证 (Basic Authentication)
-- **SOCKS5 认证**: 支持 SOCKS5 协议的用户认证
-- **客户端认证**: 客户端连接网关时的身份验证
-- **独立认证**: 每种代理类型可配置独立的认证信息
+- **Username/Password**: Username and password-based authentication mechanism
+- **HTTP Proxy Authentication**: Supports Basic Authentication for HTTP proxy
+- **SOCKS5 Authentication**: Supports user authentication for SOCKS5 protocol
+- **Client Authentication**: Authentication when clients connect to the gateway
+- **Independent Authentication**: Each proxy type can configure independent authentication information
 
-### 3. 访问控制
+### 3. Access Control
 
-- **黑名单**: 禁止访问特定主机或IP段
-- **白名单**: 仅允许访问配置的服务列表
-- **协议限制**: 限制可使用的协议类型（TCP/UDP）
+- **Blacklist**: Prohibits access to specific hosts or IP ranges
+- **Whitelist**: Only allows access to configured service lists
+- **Protocol Restrictions**: Restricts usable protocol types (TCP/UDP)
 
-## 配置管理
+## Configuration Management
 
-### 配置结构
+### Configuration Structure
 
 ```go
 type Config struct {
@@ -242,71 +242,71 @@ type SOCKS5Config struct {
 }
 ```
 
-### 配置热重载
+### Configuration Hot Reload
 
-- 支持配置文件的热重载
-- 无需重启服务即可应用新配置
-- 配置变更的平滑过渡
+- Supports hot reloading of configuration files
+- Apply new configurations without restarting services
+- Smooth transition of configuration changes
 
-## 性能优化
+## Performance Optimization
 
-### 1. 连接池
+### 1. Connection Pool
 
-- 复用 WebSocket 连接
-- 连接池大小可配置
-- 自动清理空闲连接
+- Reuse WebSocket connections
+- Configurable connection pool size
+- Automatic cleanup of idle connections
 
-### 2. 并发控制
+### 2. Concurrency Control
 
-- 限制最大并发连接数
-- 请求队列管理
-- 背压控制机制
+- Limit maximum concurrent connections
+- Request queue management
+- Backpressure control mechanism
 
-### 3. 内存管理
+### 3. Memory Management
 
-- 缓冲区复用
-- 及时释放资源
-- 内存使用监控
+- Buffer reuse
+- Timely resource release
+- Memory usage monitoring
 
-## 监控和日志
+## Monitoring and Logging
 
-### 1. 日志记录
+### 1. Logging
 
-- 结构化日志输出
-- 不同级别的日志记录
-- 敏感信息脱敏
+- Structured log output
+- Different levels of logging
+- Sensitive information masking
 
-### 2. 指标监控
+### 2. Metrics Monitoring
 
-- 连接数统计
-- 请求响应时间
-- 错误率监控
-- 流量统计
+- Connection count statistics
+- Request response time
+- Error rate monitoring
+- Traffic statistics
 
-## 扩展性
+## Scalability
 
-### 1. 水平扩展
+### 1. Horizontal Scaling
 
-- 支持多个网关实例
-- 客户端自动重连
-- 负载均衡策略
+- Supports multiple gateway instances
+- Automatic client reconnection
+- Load balancing strategies
 
-### 2. 协议扩展
+### 2. Protocol Extension
 
-- 插件化的协议支持
-- 自定义协议处理器
-- 协议转换能力
+- Plugin-based protocol support
+- Custom protocol handlers
+- Protocol conversion capabilities
 
-## 故障处理
+## Fault Handling
 
-### 1. 连接恢复
+### 1. Connection Recovery
 
-- 自动重连机制
-- 指数退避策略
-- 连接健康检查
+- Automatic reconnection mechanism
+- Exponential backoff strategy
+- Connection health checks
 
-### 2. 错误处理
+### 2. Error Handling
 
-- 优雅的错误处理
-- 错误信息传播
-- 故障隔离机制 
+- Graceful error handling
+- Error information propagation
+- Fault isolation mechanisms 

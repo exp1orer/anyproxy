@@ -1,3 +1,15 @@
+# Log configuration example - using file logging and rotation
+log:
+  level: "debug"          # Log level: debug, info, warn, error
+  format: "json"          # Log format: text, json
+  output: "file"          # Output: stdout, stderr, file
+  file: "logs/anyproxy.log"  # Log file path
+  max_size: 50            # Maximum log file size (MB), rotate when exceeded
+  max_backups: 10         # Number of old log files to retain
+  max_age: 7              # Days to retain log files
+  compress: true          # Whether to compress rotated log files
+
+
 # Example configuration for running both HTTP/HTTPS and SOCKS5 proxies simultaneously
 proxy:
   # HTTP proxy configuration
@@ -31,13 +43,13 @@ client:
   forbidden_hosts:
     - "localhost"
     - "127.0.0.1"
-    - "10.0.0.0/8"
-    - "172.16.0.0/12"
-    - "192.168.0.0/16"
-  limit:
-    - name: "web_service"
-      addr: "example.com:80"
-      protocol: "tcp"
-    - name: "secure_web"
-      addr: "example.com:443"
-      protocol: "tcp"
+    - "10.0.0.1"
+    - "172.16.0.1"
+    - "192.168.0.1"
+    - "forbidden.com"
+  allowed_hosts:
+    - "example.com"
+    - "example.org"
+    - "example.net"
+    - "192.168.0.0"
+    - ".*"

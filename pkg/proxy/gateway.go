@@ -6,10 +6,10 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -63,7 +63,7 @@ func NewGateway(cfg *config.Config) (*Gateway, error) {
 			return nil, fmt.Errorf("failed to create HTTP proxy: %v", err)
 		}
 		proxies = append(proxies, httpProxy)
-		log.Printf("Created HTTP proxy on %s", cfg.Proxy.HTTP.ListenAddr)
+		slog.Info("Created HTTP proxy", "listen_addr", cfg.Proxy.HTTP.ListenAddr)
 	}
 
 	// Create SOCKS5 proxy if configured
@@ -73,7 +73,7 @@ func NewGateway(cfg *config.Config) (*Gateway, error) {
 			return nil, fmt.Errorf("failed to create SOCKS5 proxy: %v", err)
 		}
 		proxies = append(proxies, socks5Proxy)
-		log.Printf("Created SOCKS5 proxy on %s", cfg.Proxy.SOCKS5.ListenAddr)
+		slog.Info("Created SOCKS5 proxy", "listen_addr", cfg.Proxy.SOCKS5.ListenAddr)
 	}
 
 	// Ensure at least one proxy is configured
@@ -135,9 +135,10 @@ func (g *Gateway) startHTTPServer() error {
 	g.wg.Add(1)
 	go func() {
 		defer g.wg.Done()
-		log.Printf("Starting WebSocket server on %s", g.config.ListenAddr)
+		slog.Info("Starting WebSocket server", "listen_addr", g.config.ListenAddr)
 		if err := g.httpServer.ListenAndServeTLS("", ""); err != http.ErrServerClosed {
-			log.Printf("HTTP server error: %v", err)
+			slog.Error("HTTP server error", "error", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -146,7 +147,7 @@ func (g *Gateway) startHTTPServer() error {
 
 // Stop stops the gateway gracefully
 func (g *Gateway) Stop() error {
-	log.Printf("Stopping gateway gracefully...")
+	slog.Info("Stopping gateway gracefully...")
 
 	// Step 1: Signal all goroutines to stop
 	close(g.stopCh)
@@ -155,18 +156,18 @@ func (g *Gateway) Stop() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	if err := g.httpServer.Shutdown(ctx); err != nil {
-		log.Printf("Error shutting down HTTP server: %v", err)
+		slog.Error("Error shutting down HTTP server", "error", err)
 	}
 
 	// Step 3: Stop all proxy servers
 	for i, proxy := range g.proxies {
 		if err := proxy.Stop(); err != nil {
-			log.Printf("Error stopping proxy %d: %v", i, err)
+			slog.Error("Error stopping proxy", "index", i, "error", err)
 		}
 	}
 
 	// Step 4: Give clients time to finish processing
-	log.Printf("Waiting for clients to finish processing...")
+	slog.Info("Waiting for clients to finish processing...")
 	time.Sleep(500 * time.Millisecond)
 
 	// Step 5: Stop all client connections gracefully
@@ -185,9 +186,9 @@ func (g *Gateway) Stop() error {
 
 	select {
 	case <-done:
-		log.Printf("All gateway goroutines finished gracefully")
+		slog.Info("All gateway goroutines finished gracefully")
 	case <-time.After(8 * time.Second):
-		log.Printf("Warning: timeout waiting for gateway goroutines to finish")
+		slog.Warn("Timeout waiting for gateway goroutines to finish")
 	}
 
 	return nil
@@ -211,7 +212,7 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Upgrade HTTP connection to WebSocket
 	conn, err := g.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("Failed to upgrade WebSocket connection: %v", err)
+		slog.Error("Failed to upgrade WebSocket connection", "error", err)
 		return
 	}
 
@@ -232,7 +233,7 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	g.addClient(client)
-	log.Printf("Client connected: %s", clientID)
+	slog.Info("Client connected", "client_id", clientID)
 
 	// Handle incoming messages from the client
 	g.wg.Add(1)
@@ -241,7 +242,7 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			client.Stop()
 			g.removeClient(client.ID)
-			log.Printf("Client disconnected: %s", client.ID)
+			slog.Info("Client disconnected", "client_id", client.ID)
 		}()
 		client.handleMessage()
 	}()
@@ -408,7 +409,7 @@ func (c *ClientConn) handleMessage() {
 		var msg map[string]interface{}
 		if err := c.Conn.ReadJSON(&msg); err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("WebSocket error: %v", err)
+				slog.Error("WebSocket error", "error", err)
 			}
 			return
 		}
@@ -416,7 +417,7 @@ func (c *ClientConn) handleMessage() {
 		// Process message based on its type
 		msgType, ok := msg["type"].(string)
 		if !ok {
-			log.Printf("Invalid message format from client %s", c.ID)
+			slog.Error("Invalid message format from client", "client_id", c.ID)
 			continue
 		}
 
@@ -425,7 +426,7 @@ func (c *ClientConn) handleMessage() {
 			// Route all messages to per-connection channels
 			c.routeMessage(msg)
 		default:
-			log.Printf("Unknown message type: %s", msgType)
+			slog.Warn("Unknown message type", "type", msgType)
 		}
 	}
 }
@@ -434,7 +435,7 @@ func (c *ClientConn) handleMessage() {
 func (c *ClientConn) routeMessage(msg map[string]interface{}) {
 	connID, ok := msg["id"].(string)
 	if !ok {
-		log.Printf("Invalid connection ID in message")
+		slog.Error("Invalid connection ID in message")
 		return
 	}
 
@@ -458,7 +459,7 @@ func (c *ClientConn) routeMessage(msg map[string]interface{}) {
 	select {
 	case msgChan <- msg:
 	default:
-		log.Printf("Message channel full for connection %s, dropping message", connID)
+		slog.Warn("Message channel full for connection", "conn_id", connID)
 	}
 }
 
@@ -513,27 +514,27 @@ func (c *ClientConn) handleDataMessage(msg map[string]interface{}) {
 	// Extract connection ID and data
 	connID, ok := msg["id"].(string)
 	if !ok {
-		log.Printf("Invalid connection ID in data message from client %s", c.ID)
+		slog.Error("Invalid connection ID in data message", "client_id", c.ID)
 		return
 	}
 
 	// WebSocket JSON messages encode binary data as base64 string
 	dataStr, ok := msg["data"].(string)
 	if !ok {
-		log.Printf("Invalid data in data message for connection %s from client %s, expected string but got %T", connID, c.ID, msg["data"])
+		slog.Error("Invalid data in data message", "conn_id", connID, "client_id", c.ID, "data_type", fmt.Sprintf("%T", msg["data"]))
 		return
 	}
 
 	// Decode base64 string back to []byte
 	data, err := base64.StdEncoding.DecodeString(dataStr)
 	if err != nil {
-		log.Printf("Failed to decode base64 data for connection %s from client %s: %v", connID, c.ID, err)
+		slog.Error("Failed to decode base64 data", "conn_id", connID, "client_id", c.ID, "error", err)
 		return
 	}
 
 	// Only log for larger transfers to reduce noise
 	if len(data) > 10000 {
-		log.Printf("Gateway received %d bytes from client %s for connection %s", len(data), c.ID, connID)
+		slog.Debug("Gateway received data", "bytes", len(data), "client_id", c.ID, "conn_id", connID)
 	}
 
 	// Get the connection safely
@@ -541,21 +542,21 @@ func (c *ClientConn) handleDataMessage(msg map[string]interface{}) {
 	proxyConn, ok := c.Conns[connID]
 	c.ConnsMu.RUnlock()
 	if !ok {
-		log.Printf("Unknown connection ID: %s when handling data message from client %s", connID, c.ID)
+		slog.Warn("Unknown connection ID when handling data message", "conn_id", connID, "client_id", c.ID)
 		return
 	}
 
 	// Write data to the local connection
 	n, err := proxyConn.LocalConn.Write(data)
 	if err != nil {
-		log.Printf("Failed to write %d bytes to local connection %s: %v", len(data), connID, err)
+		slog.Error("Failed to write data to local connection", "bytes", len(data), "conn_id", connID, "error", err)
 		c.closeConnection(connID)
 		return
 	}
 
 	// Only log for larger transfers
 	if n > 10000 {
-		log.Printf("Gateway successfully wrote %d bytes to local connection %s", n, connID)
+		slog.Debug("Gateway successfully wrote data to local connection", "bytes", n, "conn_id", connID)
 	}
 }
 
@@ -564,7 +565,7 @@ func (c *ClientConn) handleCloseMessage(msg map[string]interface{}) {
 	// Extract connection ID
 	connID, ok := msg["id"].(string)
 	if !ok {
-		log.Printf("Invalid connection ID in close message")
+		slog.Error("Invalid connection ID in close message")
 		return
 	}
 
@@ -574,11 +575,11 @@ func (c *ClientConn) handleCloseMessage(msg map[string]interface{}) {
 	c.ConnsMu.RUnlock()
 
 	if !ok {
-		log.Printf("Connection ID %s not found for client %s - may have already been closed", connID, c.ID)
+		slog.Info("Connection ID not found - may have already been closed", "conn_id", connID, "client_id", c.ID)
 		return
 	}
 
-	log.Printf("Closing connection %s for client %s", connID, c.ID)
+	slog.Info("Closing connection", "conn_id", connID, "client_id", c.ID)
 	c.closeConnection(connID)
 }
 
@@ -587,7 +588,7 @@ func (c *ClientConn) handleConnectResponseMessage(msg map[string]interface{}) {
 	// Extract connection ID and success status
 	connID, ok := msg["id"].(string)
 	if !ok {
-		log.Printf("Invalid connection ID in connect_response message")
+		slog.Error("Invalid connection ID in connect_response message")
 		return
 	}
 
@@ -596,18 +597,18 @@ func (c *ClientConn) handleConnectResponseMessage(msg map[string]interface{}) {
 	c.ConnsMu.RUnlock()
 
 	if !exists {
-		log.Printf("Connection %s not found for client %s", connID, c.ID)
+		slog.Warn("Connection not found", "conn_id", connID, "client_id", c.ID)
 		return
 	}
 
 	success, ok := msg["success"].(bool)
 	if !ok {
-		log.Printf("Invalid success value in connect_response message")
+		slog.Error("Invalid success value in connect_response message")
 		return
 	}
 
 	if success {
-		log.Printf("Connection %s established successfully by client %s", connID, c.ID)
+		slog.Info("Connection established successfully", "conn_id", connID, "client_id", c.ID)
 		// Start handling the connection asynchronously
 		c.wg.Add(1)
 		go func() {
@@ -619,13 +620,13 @@ func (c *ClientConn) handleConnectResponseMessage(msg map[string]interface{}) {
 
 	// Connection failed - cleanup
 	errMsg, _ := msg["error"].(string)
-	log.Printf("Connection %s failed on client %s: %s", connID, c.ID, errMsg)
+	slog.Error("Connection failed", "conn_id", connID, "client_id", c.ID, "error", errMsg)
 	c.closeConnection(connID)
 }
 
 func (c *ClientConn) handleConnection(proxyConn *ProxyConn) {
 	connID := proxyConn.ID
-	log.Printf("Starting to handle gateway connection %s for client %s", connID, c.ID)
+	slog.Debug("Starting to handle gateway connection", "conn_id", connID, "client_id", c.ID)
 
 	// Increase buffer size for better performance
 	buffer := make([]byte, 32*1024) // 32KB buffer
@@ -634,10 +635,10 @@ func (c *ClientConn) handleConnection(proxyConn *ProxyConn) {
 	for {
 		select {
 		case <-c.stopCh:
-			log.Printf("Gateway stopping, exiting connection handler %s", connID)
+			slog.Debug("Gateway stopping, exiting connection handler", "conn_id", connID)
 			return
 		case <-proxyConn.Done:
-			log.Printf("Connection %s done signal received", connID)
+			slog.Debug("Connection done signal received", "conn_id", connID)
 			return
 		default:
 		}
@@ -648,7 +649,7 @@ func (c *ClientConn) handleConnection(proxyConn *ProxyConn) {
 		c.ConnsMu.RUnlock()
 
 		if !connExists {
-			log.Printf("Connection %s no longer exists for client %s", connID, c.ID)
+			slog.Debug("Connection no longer exists", "conn_id", connID, "client_id", c.ID)
 			return
 		}
 
@@ -661,7 +662,7 @@ func (c *ClientConn) handleConnection(proxyConn *ProxyConn) {
 			totalBytes += n
 			// Only log for larger transfers to reduce noise
 			if totalBytes%100000 == 0 || n > 10000 {
-				log.Printf("Gateway read %d bytes from local connection %s (total: %d bytes)", n, connID, totalBytes)
+				slog.Debug("Gateway read data from local connection", "bytes", n, "conn_id", connID, "total_bytes", totalBytes)
 			}
 
 			// Encode binary data as base64 string
@@ -674,13 +675,13 @@ func (c *ClientConn) handleConnection(proxyConn *ProxyConn) {
 				"data": encodedData,
 			})
 			if writeErr != nil {
-				log.Printf("Error writing to WebSocket for connection %s: %v", connID, writeErr)
+				slog.Error("Error writing to WebSocket", "conn_id", connID, "error", writeErr)
 				c.closeConnection(connID)
 				return
 			}
 			// Only log for larger transfers
 			if n > 10000 {
-				log.Printf("Gateway successfully sent %d bytes to client for connection %s", n, connID)
+				slog.Debug("Gateway successfully sent data to client", "bytes", n, "conn_id", connID)
 			}
 		}
 
@@ -692,9 +693,9 @@ func (c *ClientConn) handleConnection(proxyConn *ProxyConn) {
 			}
 
 			if err != io.EOF {
-				log.Printf("Error reading from server connection %s: %v (total bytes transferred: %d)", connID, err, totalBytes)
+				slog.Error("Error reading from server connection", "conn_id", connID, "error", err, "total_bytes", totalBytes)
 			} else {
-				log.Printf("Gateway connection %s closed by local (EOF) after %d bytes", connID, totalBytes)
+				slog.Debug("Gateway connection closed by local (EOF)", "conn_id", connID, "total_bytes", totalBytes)
 			}
 
 			// Notify client about connection close
@@ -703,7 +704,7 @@ func (c *ClientConn) handleConnection(proxyConn *ProxyConn) {
 				"id":   connID,
 			})
 			if closeErr != nil {
-				log.Printf("Error sending close message to client for connection %s: %v", connID, closeErr)
+				slog.Error("Error sending close message to client", "conn_id", connID, "error", closeErr)
 			}
 
 			c.closeConnection(connID)
@@ -730,7 +731,7 @@ func (c *ClientConn) closeConnection(connID string) {
 
 	// Only proceed with cleanup if the connection existed
 	if !exists {
-		log.Printf("Connection %s already removed from client %s", connID, c.ID)
+		slog.Debug("Connection already removed", "conn_id", connID, "client_id", c.ID)
 		return
 	}
 
@@ -743,9 +744,9 @@ func (c *ClientConn) closeConnection(connID string) {
 
 	// Close the actual connection
 	proxyConn.once.Do(func() {
-		slog.Info("Closing local connection", "connID", proxyConn.ID)
+		slog.Debug("Closing local connection", "conn_id", proxyConn.ID)
 		proxyConn.LocalConn.Close()
 	})
 
-	log.Printf("Connection %s closed and cleaned up for client %s", proxyConn.ID, c.ID)
+	slog.Debug("Connection closed and cleaned up", "conn_id", proxyConn.ID, "client_id", c.ID)
 }

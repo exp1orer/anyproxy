@@ -16,24 +16,24 @@ import (
 	"github.com/buhuipao/anyproxy/pkg/config"
 )
 
-// TestHTTPProxyModes 测试HTTP代理的两种工作模式
+// TestHTTPProxyModes tests the two working modes of HTTP proxy
 func TestHTTPProxyModes(t *testing.T) {
-	// 创建一个简单的HTTPS测试服务器
+	// Create a simple HTTPS test server
 	httpsServer := createTestHTTPSServer(t)
 	defer httpsServer.Close()
 
-	// 获取服务器地址
+	// Get server address
 	serverAddr := httpsServer.Listener.Addr().String()
 	serverHost := strings.Split(serverAddr, ":")[0]
 	serverPort := strings.Split(serverAddr, ":")[1]
 
 	// Mock dial function
 	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		// 重定向到我们的测试服务器
+		// Redirect to our test server
 		return net.Dial(network, serverAddr)
 	}
 
-	// 创建HTTP代理
+	// Create HTTP proxy
 	cfg := &config.HTTPConfig{
 		ListenAddr: "127.0.0.1:0",
 	}
@@ -54,14 +54,14 @@ func TestHTTPProxyModes(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	t.Run("Mode 1: CONNECT Tunnel", func(t *testing.T) {
-		// 模拟浏览器的CONNECT隧道模式
+		// Simulate browser's CONNECT tunnel mode
 		conn, err := net.Dial("tcp", proxyAddr)
 		if err != nil {
 			t.Fatalf("Failed to connect to proxy: %v", err)
 		}
 		defer conn.Close()
 
-		// 发送CONNECT请求
+		// Send CONNECT request
 		connectReq := fmt.Sprintf("CONNECT %s:%s HTTP/1.1\r\nHost: %s:%s\r\n\r\n",
 			serverHost, serverPort, serverHost, serverPort)
 		_, err = conn.Write([]byte(connectReq))
@@ -69,7 +69,7 @@ func TestHTTPProxyModes(t *testing.T) {
 			t.Fatalf("Failed to send CONNECT: %v", err)
 		}
 
-		// 读取CONNECT响应
+		// Read CONNECT response
 		reader := bufio.NewReader(conn)
 		response, err := reader.ReadString('\n')
 		if err != nil {
@@ -80,7 +80,7 @@ func TestHTTPProxyModes(t *testing.T) {
 			t.Errorf("Expected CONNECT success, got: %s", response)
 		}
 
-		// 跳过响应头
+		// Skip response headers
 		for {
 			line, err := reader.ReadString('\n')
 			if err != nil {
@@ -91,8 +91,8 @@ func TestHTTPProxyModes(t *testing.T) {
 			}
 		}
 
-		// 现在通过隧道发送HTTPS请求
-		// 注意：这里我们发送的是原始HTTP请求，因为TLS在测试中被简化了
+		// Now send HTTPS request through tunnel
+		// Note: We're sending raw HTTP request here because TLS is simplified in testing
 		httpReq := fmt.Sprintf("GET /test HTTP/1.1\r\nHost: %s:%s\r\n\r\n",
 			serverHost, serverPort)
 		_, err = conn.Write([]byte(httpReq))
@@ -100,7 +100,7 @@ func TestHTTPProxyModes(t *testing.T) {
 			t.Fatalf("Failed to send HTTP request through tunnel: %v", err)
 		}
 
-		// 读取响应
+		// Read response
 		respLine, err := reader.ReadString('\n')
 		if err != nil {
 			t.Fatalf("Failed to read response: %v", err)
@@ -110,19 +110,19 @@ func TestHTTPProxyModes(t *testing.T) {
 			t.Errorf("Expected 200 OK, got: %s", respLine)
 		}
 
-		t.Logf("✅ CONNECT隧道模式测试成功")
+		t.Logf("✅ CONNECT tunnel mode test successful")
 	})
 
 	t.Run("Mode 2: Direct HTTPS Request", func(t *testing.T) {
-		// 模拟直接发送HTTPS URL的客户端
-		// 创建HTTP客户端，配置代理
+		// Simulate client sending direct HTTPS URL
+		// Create HTTP client with proxy configuration
 		proxyURL := fmt.Sprintf("http://%s", proxyAddr)
 		transport := &http.Transport{
 			Proxy: func(req *http.Request) (*url.URL, error) {
 				return url.Parse(proxyURL)
 			},
 			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true, // 测试环境跳过证书验证
+				InsecureSkipVerify: true, // Skip certificate verification in test environment
 			},
 		}
 
@@ -131,7 +131,7 @@ func TestHTTPProxyModes(t *testing.T) {
 			Timeout:   10 * time.Second,
 		}
 
-		// 发送HTTPS请求（注意：在测试中我们使用HTTP，但逻辑相同）
+		// Send HTTPS request (Note: We use HTTP in testing, but the logic is the same)
 		testURL := fmt.Sprintf("http://%s/test", serverAddr)
 		resp, err := client.Get(testURL)
 		if err != nil {
@@ -152,11 +152,11 @@ func TestHTTPProxyModes(t *testing.T) {
 			t.Errorf("Unexpected response body: %s", string(body))
 		}
 
-		t.Logf("✅ 直接HTTPS请求模式测试成功")
+		t.Logf("✅ Direct HTTPS request mode test successful")
 	})
 }
 
-// TestServer 包装测试服务器和监听器
+// TestServer wraps test server and listener
 type TestServer struct {
 	*http.Server
 	Listener net.Listener
@@ -167,7 +167,7 @@ func (ts *TestServer) Close() error {
 	return ts.Listener.Close()
 }
 
-// createTestHTTPSServer 创建一个简单的测试服务器
+// createTestHTTPSServer creates a simple test server
 func createTestHTTPSServer(t *testing.T) *TestServer {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {

@@ -1,177 +1,177 @@
-# HTTP 代理故障排除指南
+# HTTP Proxy Troubleshooting Guide
 
-## 常见错误和解决方案
+## Common Errors and Solutions
 
 ### 1. ERR_TUNNEL_CONNECTION_FAILED
 
-**错误描述**: 
+**Error Description**: 
 ```
 This site can't be reached
 The webpage at https://example.com/ might be temporarily down or it may have moved permanently to a new web address.
 ERR_TUNNEL_CONNECTION_FAILED
 ```
 
-**原因分析**:
-- HTTPS CONNECT 隧道建立失败
-- 代理服务器无法连接到目标服务器
-- 代理服务器配置错误
+**Root Cause Analysis**:
+- HTTPS CONNECT tunnel establishment failed
+- Proxy server cannot connect to target server
+- Proxy server configuration error
 
-**解决方案**:
+**Solutions**:
 
-#### 1.1 检查代理配置
+#### 1.1 Check Proxy Configuration
 
-确保 HTTP 代理正确配置：
+Ensure HTTP proxy is correctly configured:
 
 ```yaml
 proxy:
   http:
-    listen_addr: "0.0.0.0:8080"  # 确保端口正确
-    auth_username: "your_user"   # 可选
-    auth_password: "your_pass"   # 可选
+    listen_addr: "0.0.0.0:8080"  # Ensure port is correct
+    auth_username: "your_user"   # Optional
+    auth_password: "your_pass"   # Optional
 ```
 
-#### 1.2 检查客户端连接
+#### 1.2 Check Client Connection
 
-确保至少有一个客户端连接到网关：
+Ensure at least one client is connected to the gateway:
 
 ```bash
-# 查看网关日志，应该看到类似信息：
+# Check gateway logs, should see similar information:
 # Client connected: client-001
 ```
 
-#### 1.3 检查网络连通性
+#### 1.3 Check Network Connectivity
 
-测试代理服务器是否可达：
+Test if proxy server is reachable:
 
 ```bash
-# 测试代理端口是否开放
+# Test if proxy port is open
 telnet your-proxy-server 8080
 
-# 测试简单的 HTTP 请求
+# Test simple HTTP request
 curl -v -x http://your-proxy-server:8080 http://httpbin.org/ip
 ```
 
-#### 1.4 检查目标服务器
+#### 1.4 Check Target Server
 
-确保目标服务器可以从客户端访问：
+Ensure target server is accessible from client:
 
 ```bash
-# 在客户端机器上测试
+# Test on client machine
 curl -v https://www.bilibili.com/
 ```
 
 ### 2. 407 Proxy Authentication Required
 
-**错误描述**:
+**Error Description**:
 ```
 HTTP/1.1 407 Proxy Authentication Required
 Proxy-Authenticate: Basic realm="Proxy"
 ```
 
-**解决方案**:
+**Solutions**:
 
-#### 2.1 提供正确的认证信息
+#### 2.1 Provide Correct Authentication
 
 ```bash
-# 使用用户名密码
+# Use username and password
 curl -x http://username:password@proxy-server:8080 https://example.com
 
-# 或设置环境变量
+# Or set environment variables
 export http_proxy=http://username:password@proxy-server:8080
 export https_proxy=http://username:password@proxy-server:8080
 ```
 
-#### 2.2 浏览器配置
+#### 2.2 Browser Configuration
 
-在浏览器代理设置中：
-- 代理类型: HTTP
-- 代理地址: your-proxy-server
-- 代理端口: 8080
-- 用户名: your_username
-- 密码: your_password
+In browser proxy settings:
+- Proxy Type: HTTP
+- Proxy Address: your-proxy-server
+- Proxy Port: 8080
+- Username: your_username
+- Password: your_password
 
 ### 3. 502 Bad Gateway
 
-**错误描述**:
+**Error Description**:
 ```
 HTTP/1.1 502 Bad Gateway
 ```
 
-**原因分析**:
-- 代理无法连接到目标服务器
-- 客户端连接断开
-- 网络路由问题
+**Root Cause Analysis**:
+- Proxy cannot connect to target server
+- Client connection disconnected
+- Network routing issues
 
-**解决方案**:
+**Solutions**:
 
-#### 3.1 检查客户端状态
+#### 3.1 Check Client Status
 
 ```bash
-# 查看网关日志
+# Check gateway logs
 tail -f gateway.log
 
-# 应该看到客户端连接信息
+# Should see client connection information
 # Client connected: client-001
 ```
 
-#### 3.2 检查目标服务器可达性
+#### 3.2 Check Target Server Reachability
 
 ```bash
-# 在客户端机器上测试
+# Test on client machine
 ping target-server.com
 telnet target-server.com 443
 ```
 
-#### 3.3 检查防火墙设置
+#### 3.3 Check Firewall Settings
 
-确保客户端可以访问目标服务器：
-- 检查出站防火墙规则
-- 检查网络策略
-- 检查 DNS 解析
+Ensure client can access target server:
+- Check outbound firewall rules
+- Check network policies
+- Check DNS resolution
 
-### 4. 连接超时
+### 4. Connection Timeout
 
-**错误描述**:
+**Error Description**:
 ```
 curl: (7) Failed to connect to proxy-server port 8080: Connection timed out
 ```
 
-**解决方案**:
+**Solutions**:
 
-#### 4.1 检查代理服务器状态
+#### 4.1 Check Proxy Server Status
 
 ```bash
-# 检查代理进程是否运行
+# Check if proxy process is running
 ps aux | grep anyproxy
 
-# 检查端口监听
+# Check port listening
 netstat -tlnp | grep 8080
 ```
 
-#### 4.2 检查网络连通性
+#### 4.2 Check Network Connectivity
 
 ```bash
-# 测试网络连接
+# Test network connection
 ping proxy-server
 traceroute proxy-server
 ```
 
-#### 4.3 检查防火墙
+#### 4.3 Check Firewall
 
 ```bash
-# 检查防火墙规则
+# Check firewall rules
 iptables -L
 ufw status
 
-# 开放代理端口
+# Open proxy port
 ufw allow 8080
 ```
 
-## 调试技巧
+## Debugging Techniques
 
-### 1. 启用详细日志
+### 1. Enable Verbose Logging
 
-在配置文件中启用调试日志：
+Enable debug logging in configuration file:
 
 ```yaml
 log:
@@ -179,39 +179,39 @@ log:
   format: json
 ```
 
-### 2. 使用 curl 测试
+### 2. Use curl for Testing
 
 ```bash
-# 测试 HTTP 请求
+# Test HTTP request
 curl -v -x http://proxy:8080 http://httpbin.org/ip
 
-# 测试 HTTPS 请求
+# Test HTTPS request
 curl -v -x http://proxy:8080 https://httpbin.org/ip
 
-# 测试带认证的请求
+# Test authenticated request
 curl -v -x http://user:pass@proxy:8080 https://httpbin.org/ip
 ```
 
-### 3. 使用 openssl 测试 HTTPS
+### 3. Use openssl for HTTPS Testing
 
 ```bash
-# 通过代理测试 HTTPS 连接
+# Test HTTPS connection through proxy
 openssl s_client -connect httpbin.org:443 -proxy proxy:8080
 ```
 
-### 4. 网络抓包
+### 4. Network Packet Capture
 
 ```bash
-# 使用 tcpdump 抓包分析
+# Use tcpdump for packet capture analysis
 tcpdump -i any -w proxy-debug.pcap port 8080
 
-# 使用 wireshark 分析抓包文件
+# Use wireshark to analyze capture file
 wireshark proxy-debug.pcap
 ```
 
-## 性能优化
+## Performance Optimization
 
-### 1. 调整超时设置
+### 1. Adjust Timeout Settings
 
 ```yaml
 proxy:
@@ -221,14 +221,14 @@ proxy:
     idle_timeout: 60s
 ```
 
-### 2. 调整缓冲区大小
+### 2. Adjust Buffer Size
 
 ```go
-// 在代码中调整缓冲区大小
+// Adjust buffer size in code
 buffer := make([]byte, 64*1024) // 64KB buffer
 ```
 
-### 3. 连接池优化
+### 3. Connection Pool Optimization
 
 ```yaml
 client:
@@ -236,29 +236,29 @@ client:
   keep_alive_timeout: 30s
 ```
 
-## 监控和告警
+## Monitoring and Alerting
 
-### 1. 关键指标
+### 1. Key Metrics
 
-- 代理连接数
-- 请求成功率
-- 响应时间
-- 错误率
+- Proxy connection count
+- Request success rate
+- Response time
+- Error rate
 
-### 2. 日志监控
+### 2. Log Monitoring
 
 ```bash
-# 监控错误日志
+# Monitor error logs
 tail -f gateway.log | grep ERROR
 
-# 统计连接数
+# Count connections
 grep "Client connected" gateway.log | wc -l
 ```
 
-### 3. 健康检查
+### 3. Health Checks
 
 ```bash
-# 创建健康检查脚本
+# Create health check script
 #!/bin/bash
 curl -f -x http://proxy:8080 http://httpbin.org/status/200
 if [ $? -eq 0 ]; then
@@ -269,42 +269,42 @@ else
 fi
 ```
 
-## 常见配置错误
+## Common Configuration Errors
 
-### 1. 端口冲突
+### 1. Port Conflicts
 
 ```bash
-# 检查端口占用
+# Check port usage
 lsof -i :8080
 netstat -tlnp | grep 8080
 ```
 
-### 2. 权限问题
+### 2. Permission Issues
 
 ```bash
-# 确保有权限绑定端口
-# 对于 < 1024 的端口需要 root 权限
+# Ensure permission to bind port
+# Ports < 1024 require root privileges
 sudo ./anyproxy-gateway
 ```
 
-### 3. 配置文件格式错误
+### 3. Configuration File Format Errors
 
 ```bash
-# 验证 YAML 格式
+# Validate YAML format
 yamllint config.yaml
 
-# 检查配置文件语法
+# Check configuration file syntax
 ./anyproxy-gateway --config config.yaml --check-config
 ```
 
-## 联系支持
+## Contact Support
 
-如果问题仍然存在，请提供以下信息：
+If the problem persists, please provide the following information:
 
-1. 错误信息的完整日志
-2. 代理配置文件
-3. 网络拓扑图
-4. 客户端和服务器的操作系统版本
-5. 重现问题的详细步骤
+1. Complete error logs
+2. Proxy configuration file
+3. Network topology diagram
+4. Operating system versions of client and server
+5. Detailed steps to reproduce the issue
 
-提交 Issue 到: https://github.com/buhuipao/anyproxy/issues 
+Submit Issue to: https://github.com/buhuipao/anyproxy/issues 

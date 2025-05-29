@@ -1,21 +1,21 @@
 #!/bin/bash
 
-# AnyProxy 服务管理脚本
+# AnyProxy Service Management Script
 
 set -e
 
-# 颜色输出
+# Color output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# 服务名称
+# Service names
 GATEWAY_SERVICE="anyproxy-gateway"
 CLIENT_SERVICE="anyproxy-client"
 
-# 日志函数
+# Log functions
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
 }
@@ -32,47 +32,47 @@ log_debug() {
     echo -e "${BLUE}[DEBUG]${NC} $1"
 }
 
-# 显示帮助信息
+# Show help information
 show_help() {
-    echo "AnyProxy 服务管理脚本"
+    echo "AnyProxy Service Management Script"
     echo
-    echo "用法: $0 <命令> [服务名]"
+    echo "Usage: $0 <command> [service_name]"
     echo
-    echo "命令:"
-    echo "  start     启动服务"
-    echo "  stop      停止服务"
-    echo "  restart   重启服务"
-    echo "  status    查看服务状态"
-    echo "  enable    启用开机自启"
-    echo "  disable   禁用开机自启"
-    echo "  logs      查看服务日志"
-    echo "  install   安装并配置服务"
-    echo "  uninstall 卸载服务"
+    echo "Commands:"
+    echo "  start     Start service"
+    echo "  stop      Stop service"
+    echo "  restart   Restart service"
+    echo "  status    Show service status"
+    echo "  enable    Enable auto-start on boot"
+    echo "  disable   Disable auto-start on boot"
+    echo "  logs      Show service logs"
+    echo "  install   Install and configure services"
+    echo "  uninstall Uninstall services"
     echo
-    echo "服务名 (可选):"
-    echo "  gateway   网关服务"
-    echo "  client    客户端服务"
-    echo "  all       所有服务 (默认)"
+    echo "Service names (optional):"
+    echo "  gateway   Gateway service"
+    echo "  client    Client service"
+    echo "  all       All services (default)"
     echo
-    echo "示例:"
-    echo "  $0 start           # 启动所有服务"
-    echo "  $0 start gateway   # 只启动网关服务"
-    echo "  $0 status          # 查看所有服务状态"
-    echo "  $0 logs client     # 查看客户端日志"
+    echo "Examples:"
+    echo "  $0 start           # Start all services"
+    echo "  $0 start gateway   # Start only gateway service"
+    echo "  $0 status          # Show all service status"
+    echo "  $0 logs client     # Show client logs"
 }
 
-# 检查服务是否存在
+# Check if service exists
 check_service_exists() {
     local service=$1
     if ! systemctl list-unit-files | grep -q "^$service.service"; then
-        log_error "服务 $service 不存在"
-        log_info "请先运行: $0 install"
+        log_error "Service $service does not exist"
+        log_info "Please run first: $0 install"
         return 1
     fi
     return 0
 }
 
-# 获取服务列表
+# Get service list
 get_services() {
     local target=$1
     case $target in
@@ -86,186 +86,186 @@ get_services() {
             echo "$GATEWAY_SERVICE $CLIENT_SERVICE"
             ;;
         *)
-            log_error "未知的服务名: $target"
-            log_info "支持的服务名: gateway, client, all"
+            log_error "Unknown service name: $target"
+            log_info "Supported service names: gateway, client, all"
             exit 1
             ;;
     esac
 }
 
-# 启动服务
+# Start services
 start_services() {
     local target=$1
     local services=$(get_services "$target")
     
     for service in $services; do
         if check_service_exists "$service"; then
-            log_info "启动服务: $service"
+            log_info "Starting service: $service"
             if sudo systemctl start "$service"; then
-                log_info "服务 $service 启动成功"
+                log_info "Service $service started successfully"
             else
-                log_error "服务 $service 启动失败"
+                log_error "Failed to start service $service"
             fi
         fi
     done
 }
 
-# 停止服务
+# Stop services
 stop_services() {
     local target=$1
     local services=$(get_services "$target")
     
     for service in $services; do
         if check_service_exists "$service"; then
-            log_info "停止服务: $service"
+            log_info "Stopping service: $service"
             if sudo systemctl stop "$service"; then
-                log_info "服务 $service 停止成功"
+                log_info "Service $service stopped successfully"
             else
-                log_error "服务 $service 停止失败"
+                log_error "Failed to stop service $service"
             fi
         fi
     done
 }
 
-# 重启服务
+# Restart services
 restart_services() {
     local target=$1
     local services=$(get_services "$target")
     
     for service in $services; do
         if check_service_exists "$service"; then
-            log_info "重启服务: $service"
+            log_info "Restarting service: $service"
             if sudo systemctl restart "$service"; then
-                log_info "服务 $service 重启成功"
+                log_info "Service $service restarted successfully"
             else
-                log_error "服务 $service 重启失败"
+                log_error "Failed to restart service $service"
             fi
         fi
     done
 }
 
-# 查看服务状态
+# Show service status
 show_status() {
     local target=$1
     local services=$(get_services "$target")
     
     echo
-    echo "=== AnyProxy 服务状态 ==="
+    echo "=== AnyProxy Service Status ==="
     echo
     
     for service in $services; do
         if check_service_exists "$service"; then
-            echo "服务: $service"
+            echo "Service: $service"
             sudo systemctl status "$service" --no-pager -l
             echo
         fi
     done
 }
 
-# 启用开机自启
+# Enable auto-start on boot
 enable_services() {
     local target=$1
     local services=$(get_services "$target")
     
     for service in $services; do
         if check_service_exists "$service"; then
-            log_info "启用服务开机自启: $service"
+            log_info "Enabling auto-start for service: $service"
             if sudo systemctl enable "$service"; then
-                log_info "服务 $service 开机自启启用成功"
+                log_info "Auto-start enabled successfully for service $service"
             else
-                log_error "服务 $service 开机自启启用失败"
+                log_error "Failed to enable auto-start for service $service"
             fi
         fi
     done
 }
 
-# 禁用开机自启
+# Disable auto-start on boot
 disable_services() {
     local target=$1
     local services=$(get_services "$target")
     
     for service in $services; do
         if check_service_exists "$service"; then
-            log_info "禁用服务开机自启: $service"
+            log_info "Disabling auto-start for service: $service"
             if sudo systemctl disable "$service"; then
-                log_info "服务 $service 开机自启禁用成功"
+                log_info "Auto-start disabled successfully for service $service"
             else
-                log_error "服务 $service 开机自启禁用失败"
+                log_error "Failed to disable auto-start for service $service"
             fi
         fi
     done
 }
 
-# 查看服务日志
+# Show service logs
 show_logs() {
     local target=$1
     local services=$(get_services "$target")
     
     if [ $(echo "$services" | wc -w) -eq 1 ]; then
-        # 单个服务，显示实时日志
+        # Single service, show real-time logs
         local service=$services
         if check_service_exists "$service"; then
-            log_info "显示服务日志: $service (按 Ctrl+C 退出)"
+            log_info "Showing service logs: $service (Press Ctrl+C to exit)"
             sudo journalctl -u "$service" -f
         fi
     else
-        # 多个服务，显示最近的日志
+        # Multiple services, show recent logs
         for service in $services; do
             if check_service_exists "$service"; then
                 echo
-                echo "=== $service 最近日志 ==="
+                echo "=== $service Recent Logs ==="
                 sudo journalctl -u "$service" --since "1 hour ago" --no-pager
             fi
         done
     fi
 }
 
-# 安装服务
+# Install services
 install_services() {
-    log_info "开始安装 AnyProxy 服务..."
+    log_info "Starting AnyProxy service installation..."
     
     local script_dir=$(dirname "$(readlink -f "$0")")
     local setup_script="$script_dir/setup_runtime_dirs.sh"
     
     if [[ -f "$setup_script" ]]; then
-        log_info "运行安装脚本..."
+        log_info "Running installation script..."
         sudo bash "$setup_script"
     else
-        log_error "未找到安装脚本: $setup_script"
+        log_error "Installation script not found: $setup_script"
         exit 1
     fi
 }
 
-# 卸载服务
+# Uninstall services
 uninstall_services() {
-    log_warn "这将完全卸载 AnyProxy 服务和相关文件"
-    read -p "确定要继续吗? (y/N): " -n 1 -r
+    log_warn "This will completely uninstall AnyProxy services and related files"
+    read -p "Are you sure you want to continue? (y/N): " -n 1 -r
     echo
     
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        log_info "取消卸载"
+        log_info "Uninstallation cancelled"
         return
     fi
     
-    log_info "开始卸载 AnyProxy 服务..."
+    log_info "Starting AnyProxy service uninstallation..."
     
-    # 停止并禁用服务
+    # Stop and disable services
     for service in $GATEWAY_SERVICE $CLIENT_SERVICE; do
         if systemctl list-unit-files | grep -q "^$service.service"; then
-            log_info "停止并禁用服务: $service"
+            log_info "Stopping and disabling service: $service"
             sudo systemctl stop "$service" 2>/dev/null || true
             sudo systemctl disable "$service" 2>/dev/null || true
         fi
     done
     
-    # 删除服务文件
+    # Remove service files
     sudo rm -f "/etc/systemd/system/$GATEWAY_SERVICE.service"
     sudo rm -f "/etc/systemd/system/$CLIENT_SERVICE.service"
     
-    # 重新加载 systemd
+    # Reload systemd
     sudo systemctl daemon-reload
     
-    # 删除目录和文件
+    # Remove directories and files
     sudo rm -rf /opt/anyproxy
     sudo rm -rf /etc/anyproxy
     sudo rm -rf /var/lib/anyproxy
@@ -273,16 +273,16 @@ uninstall_services() {
     sudo rm -rf /var/run/anyproxy
     sudo rm -f /etc/logrotate.d/anyproxy
     
-    # 删除用户
+    # Remove user
     if id "anyproxy" &>/dev/null; then
         sudo userdel anyproxy
-        log_info "删除用户: anyproxy"
+        log_info "Removed user: anyproxy"
     fi
     
-    log_info "AnyProxy 服务卸载完成"
+    log_info "AnyProxy service uninstallation completed"
 }
 
-# 主函数
+# Main function
 main() {
     local command=$1
     local target=$2
@@ -319,7 +319,7 @@ main() {
             show_help
             ;;
         *)
-            log_error "未知命令: $command"
+            log_error "Unknown command: $command"
             echo
             show_help
             exit 1
@@ -327,5 +327,5 @@ main() {
     esac
 }
 
-# 运行主函数
+# Run main function
 main "$@" 

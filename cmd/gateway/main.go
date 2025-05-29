@@ -2,12 +2,13 @@ package main
 
 import (
 	"flag"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/buhuipao/anyproxy/pkg/config"
+	"github.com/buhuipao/anyproxy/pkg/logger"
 	"github.com/buhuipao/anyproxy/pkg/proxy"
 )
 
@@ -19,13 +20,21 @@ func main() {
 	// Load configuration
 	cfg, err := config.LoadConfig(*configFile)
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		slog.Error("Failed to load configuration", "error", err)
+		os.Exit(1)
+	}
+
+	// Initialize logger
+	if err := logger.Init(&cfg.Log); err != nil {
+		slog.Error("Failed to initialize logger", "error", err)
+		os.Exit(1)
 	}
 
 	// Create and start gateway
 	gateway, err := proxy.NewGateway(cfg)
 	if err != nil {
-		log.Fatalf("Failed to create gateway: %v", err)
+		slog.Error("Failed to create gateway", "error", err)
+		os.Exit(1)
 	}
 
 	// Handle signals for graceful shutdown
@@ -35,20 +44,21 @@ func main() {
 	// Start gateway in a separate goroutine
 	go func() {
 		if err := gateway.Start(); err != nil {
-			log.Fatalf("Gateway failed: %v", err)
+			slog.Error("Gateway failed", "error", err)
+			os.Exit(1)
 		}
 	}()
 
-	log.Printf("Gateway started on %s", cfg.Gateway.ListenAddr)
+	slog.Info("Gateway started", "listen_addr", cfg.Gateway.ListenAddr)
 
 	// Wait for termination signal
 	<-sigCh
-	log.Println("Shutting down...")
+	slog.Info("Shutting down...")
 
 	// Stop gateway
 	if err := gateway.Stop(); err != nil {
-		log.Printf("Error shutting down gateway: %v", err)
+		slog.Error("Error shutting down gateway", "error", err)
 	}
 
-	log.Println("Gateway stopped")
+	slog.Info("Gateway stopped")
 }

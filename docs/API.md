@@ -1,22 +1,22 @@
-# AnyProxy API 文档
+# AnyProxy API Documentation
 
-## 概述
+## Overview
 
-AnyProxy 使用 WebSocket + TLS 协议进行客户端和网关之间的通信，同时支持 HTTP/HTTPS 和 SOCKS5 代理服务。本文档描述了通信协议、消息格式和 API 接口。
+AnyProxy uses WebSocket + TLS protocol for communication between clients and gateways, while supporting both HTTP/HTTPS and SOCKS5 proxy services. This document describes the communication protocol, message formats, and API interfaces.
 
-## WebSocket 连接
+## WebSocket Connection
 
-### 连接建立
+### Connection Establishment
 
-客户端通过 WebSocket 连接到网关：
+Clients connect to the gateway via WebSocket:
 
 ```
 wss://gateway-host:8443/ws
 ```
 
-### 认证
+### Authentication
 
-连接建立后，客户端需要发送认证消息：
+After connection establishment, clients need to send authentication messages:
 
 ```json
 {
@@ -29,7 +29,7 @@ wss://gateway-host:8443/ws
 }
 ```
 
-网关响应：
+Gateway response:
 
 ```json
 {
@@ -41,24 +41,24 @@ wss://gateway-host:8443/ws
 }
 ```
 
-## 消息格式
+## Message Format
 
-所有消息都使用 JSON 格式，包含以下基本结构：
+All messages use JSON format with the following basic structure:
 
 ```json
 {
   "type": "message_type",
   "data": {
-    // 消息数据
+    // Message data
   }
 }
 ```
 
-## 消息类型
+## Message Types
 
-### 1. 认证消息 (auth)
+### 1. Authentication Message (auth)
 
-**客户端 → 网关**
+**Client → Gateway**
 
 ```json
 {
@@ -71,7 +71,7 @@ wss://gateway-host:8443/ws
 }
 ```
 
-**网关 → 客户端**
+**Gateway → Client**
 
 ```json
 {
@@ -83,11 +83,11 @@ wss://gateway-host:8443/ws
 }
 ```
 
-### 2. 连接请求 (connect)
+### 2. Connection Request (connect)
 
-**网关 → 客户端**
+**Gateway → Client**
 
-当有新的代理请求时，网关发送连接请求：
+When there's a new proxy request, the gateway sends a connection request:
 
 ```json
 {
@@ -101,9 +101,9 @@ wss://gateway-host:8443/ws
 }
 ```
 
-**客户端 → 网关**
+**Client → Gateway**
 
-客户端响应连接结果：
+Client responds with connection result:
 
 ```json
 {
@@ -116,11 +116,11 @@ wss://gateway-host:8443/ws
 }
 ```
 
-### 3. 数据传输 (data)
+### 3. Data Transfer (data)
 
-**双向传输**
+**Bidirectional**
 
-用于在网关和客户端之间传输代理数据：
+Used for transferring proxy data between gateway and client:
 
 ```json
 {
@@ -132,11 +132,11 @@ wss://gateway-host:8443/ws
 }
 ```
 
-### 4. 连接关闭 (close)
+### 4. Connection Close (close)
 
-**双向传输**
+**Bidirectional**
 
-通知对方关闭特定连接：
+Notifies the other party to close a specific connection:
 
 ```json
 {
@@ -148,9 +148,9 @@ wss://gateway-host:8443/ws
 }
 ```
 
-### 5. 心跳消息 (ping/pong)
+### 5. Heartbeat Messages (ping/pong)
 
-**客户端 → 网关**
+**Client → Gateway**
 
 ```json
 {
@@ -161,7 +161,7 @@ wss://gateway-host:8443/ws
 }
 ```
 
-**网关 → 客户端**
+**Gateway → Client**
 
 ```json
 {
@@ -172,9 +172,9 @@ wss://gateway-host:8443/ws
 }
 ```
 
-### 6. 错误消息 (error)
+### 6. Error Messages (error)
 
-**双向传输**
+**Bidirectional**
 
 ```json
 {
@@ -187,20 +187,20 @@ wss://gateway-host:8443/ws
 }
 ```
 
-## 错误代码
+## Error Codes
 
-| 代码 | 描述 |
-|------|------|
-| `AUTH_FAILED` | 认证失败 |
-| `INVALID_MESSAGE` | 无效消息格式 |
-| `CONNECTION_FAILED` | 连接目标失败 |
-| `FORBIDDEN_HOST` | 禁止访问的主机 |
-| `RATE_LIMITED` | 请求频率限制 |
-| `INTERNAL_ERROR` | 内部错误 |
+| Code | Description |
+|------|-------------|
+| `AUTH_FAILED` | Authentication failed |
+| `INVALID_MESSAGE` | Invalid message format |
+| `CONNECTION_FAILED` | Failed to connect to target |
+| `FORBIDDEN_HOST` | Forbidden host access |
+| `RATE_LIMITED` | Request rate limited |
+| `INTERNAL_ERROR` | Internal error |
 
-## 连接生命周期
+## Connection Lifecycle
 
-### 1. 建立连接
+### 1. Establishing Connection
 
 ```mermaid
 sequenceDiagram
@@ -218,7 +218,7 @@ sequenceDiagram
     end
 ```
 
-### 2. 代理请求处理
+### 2. Proxy Request Processing
 
 ```mermaid
 sequenceDiagram
@@ -248,33 +248,33 @@ sequenceDiagram
     C->>T: Close Connection
 ```
 
-## 配置 API
+## Configuration API
 
-### 代理配置
+### Proxy Configuration
 
-支持同时配置 HTTP 和 SOCKS5 代理：
+Supports simultaneous configuration of HTTP and SOCKS5 proxies:
 
 ```yaml
 proxy:
-  # HTTP 代理配置
+  # HTTP proxy configuration
   http:
     listen_addr: ":8080"
     auth_username: "http_user"
     auth_password: "http_password"
   
-  # SOCKS5 代理配置
+  # SOCKS5 proxy configuration
   socks5:
     listen_addr: ":1080"
     auth_username: "socks_user"
     auth_password: "socks_password"
 ```
 
-**配置说明**:
-- 可以同时配置两种代理类型
-- 可以只配置其中一种代理类型
-- 每种代理有独立的监听地址和认证配置
+**Configuration Notes**:
+- Can configure both proxy types simultaneously
+- Can configure only one proxy type
+- Each proxy has independent listening addresses and authentication configuration
 
-### 网关配置
+### Gateway Configuration
 
 ```yaml
 gateway:
@@ -285,7 +285,7 @@ gateway:
   auth_password: "gateway_password"
 ```
 
-### 客户端配置
+### Client Configuration
 
 ```yaml
 client:
@@ -305,72 +305,72 @@ client:
       protocol: "tcp"
 ```
 
-## 安全考虑
+## Security Considerations
 
-### 1. TLS 配置
+### 1. TLS Configuration
 
-- 使用 TLS 1.2 或更高版本
-- 验证服务器证书
-- 支持客户端证书认证
+- Use TLS 1.2 or higher
+- Verify server certificates
+- Support client certificate authentication
 
-### 2. 认证机制
+### 2. Authentication Mechanisms
 
-- 基于用户名密码的认证
-- 支持自定义认证插件
-- 认证失败后的重试限制
+- Username and password-based authentication
+- Support for custom authentication plugins
+- Retry limits after authentication failures
 
-### 3. 访问控制
+### 3. Access Control
 
-- 基于主机名的黑白名单
-- 基于 IP 地址的访问控制
-- 协议级别的限制
+- Hostname-based blacklist and whitelist
+- IP address-based access control
+- Protocol-level restrictions
 
-## 性能优化
+## Performance Optimization
 
-### 1. 连接复用
+### 1. Connection Reuse
 
-- WebSocket 连接复用
-- 连接池管理
-- 自动清理空闲连接
+- WebSocket connection reuse
+- Connection pool management
+- Automatic cleanup of idle connections
 
-### 2. 数据压缩
+### 2. Data Compression
 
-- 支持 WebSocket 压缩扩展
-- 可配置的压缩级别
-- 自适应压缩策略
+- Support for WebSocket compression extensions
+- Configurable compression levels
+- Adaptive compression strategies
 
-### 3. 缓冲管理
+### 3. Buffer Management
 
-- 可配置的缓冲区大小
-- 背压控制机制
-- 内存使用优化
+- Configurable buffer sizes
+- Backpressure control mechanisms
+- Memory usage optimization
 
-## 监控指标
+## Monitoring Metrics
 
-### 连接指标
+### Connection Metrics
 
-- 活跃连接数
-- 连接建立速率
-- 连接失败率
-- 平均连接持续时间
+- Active connection count
+- Connection establishment rate
+- Connection failure rate
+- Average connection duration
 
-### 流量指标
+### Traffic Metrics
 
-- 入站/出站字节数
-- 消息处理速率
-- 延迟统计
-- 错误率
+- Inbound/outbound bytes
+- Message processing rate
+- Latency statistics
+- Error rate
 
-### 性能指标
+### Performance Metrics
 
-- CPU 使用率
-- 内存使用量
-- 网络带宽使用
-- 并发连接数
+- CPU usage
+- Memory consumption
+- Network bandwidth usage
+- Concurrent connection count
 
-## 示例代码
+## Example Code
 
-### 客户端连接示例
+### Client Connection Example
 
 ```go
 package main
@@ -396,7 +396,7 @@ type AuthData struct {
 }
 
 func main() {
-    // 连接到网关
+    // Connect to gateway
     u := url.URL{Scheme: "wss", Host: "gateway.example.com:8443", Path: "/ws"}
     
     dialer := websocket.Dialer{
@@ -411,7 +411,7 @@ func main() {
     }
     defer conn.Close()
     
-    // 发送认证消息
+    // Send authentication message
     authMsg := Message{
         Type: "auth",
         Data: AuthData{
@@ -425,7 +425,7 @@ func main() {
         log.Fatal("write auth:", err)
     }
     
-    // 读取认证响应
+    // Read authentication response
     var response Message
     if err := conn.ReadJSON(&response); err != nil {
         log.Fatal("read auth response:", err)
@@ -433,7 +433,7 @@ func main() {
     
     log.Printf("Auth response: %+v", response)
     
-    // 处理消息循环
+    // Message processing loop
     for {
         var msg Message
         if err := conn.ReadJSON(&msg); err != nil {
@@ -441,7 +441,7 @@ func main() {
             break
         }
         
-        // 处理不同类型的消息
+        // Handle different message types
         switch msg.Type {
         case "connect":
             handleConnect(conn, msg)
@@ -456,10 +456,10 @@ func main() {
 }
 
 func handleConnect(conn *websocket.Conn, msg Message) {
-    // 处理连接请求
+    // Handle connection request
     log.Printf("Received connect request: %+v", msg.Data)
     
-    // 响应连接结果
+    // Respond with connection result
     response := Message{
         Type: "connect_response",
         Data: map[string]interface{}{
@@ -473,17 +473,17 @@ func handleConnect(conn *websocket.Conn, msg Message) {
 }
 
 func handleData(conn *websocket.Conn, msg Message) {
-    // 处理数据传输
+    // Handle data transfer
     log.Printf("Received data: %+v", msg.Data)
 }
 
 func handleClose(conn *websocket.Conn, msg Message) {
-    // 处理连接关闭
+    // Handle connection close
     log.Printf("Received close: %+v", msg.Data)
 }
 
 func handlePing(conn *websocket.Conn, msg Message) {
-    // 响应心跳
+    // Respond to heartbeat
     response := Message{
         Type: "pong",
         Data: msg.Data,
@@ -492,78 +492,78 @@ func handlePing(conn *websocket.Conn, msg Message) {
 }
 ```
 
-## 故障排除
+## Troubleshooting
 
-### 常见问题
+### Common Issues
 
-1. **WebSocket 连接失败**
-   - 检查网络连通性
-   - 验证 TLS 证书
-   - 确认端口开放
+1. **WebSocket Connection Failure**
+   - Check network connectivity
+   - Verify TLS certificates
+   - Confirm port accessibility
 
-2. **认证失败**
-   - 检查用户名密码
-   - 验证客户端 ID
-   - 查看认证日志
+2. **Authentication Failure**
+   - Check username and password
+   - Verify client ID
+   - Review authentication logs
 
-3. **消息格式错误**
-   - 验证 JSON 格式
-   - 检查必需字段
-   - 确认数据类型
+3. **Message Format Errors**
+   - Validate JSON format
+   - Check required fields
+   - Confirm data types
 
-## HTTP 代理使用示例
+## HTTP Proxy Usage Examples
 
-### 基本 HTTP 请求
+### Basic HTTP Requests
 
 ```bash
-# 使用 curl 通过 HTTP 代理
+# Use curl through HTTP proxy
 curl -x http://http_user:http_password@localhost:8080 https://example.com
 
-# 设置环境变量
+# Set environment variables
 export http_proxy=http://http_user:http_password@localhost:8080
 export https_proxy=http://http_user:http_password@localhost:8080
 curl https://example.com
 ```
 
-### HTTPS 隧道 (CONNECT 方法)
+### HTTPS Tunnel (CONNECT Method)
 
 ```bash
-# 使用 CONNECT 方法建立 HTTPS 隧道
+# Use CONNECT method to establish HTTPS tunnel
 curl -x http://http_user:http_password@localhost:8080 https://secure.example.com
 ```
 
-### 浏览器配置
+### Browser Configuration
 
-在浏览器中配置 HTTP 代理：
-- 代理类型: HTTP
-- 代理地址: localhost
-- 代理端口: 8080
-- 用户名: http_user
-- 密码: http_password
+Configure HTTP proxy in browser:
+- Proxy Type: HTTP
+- Proxy Address: localhost
+- Proxy Port: 8080
+- Username: http_user
+- Password: http_password
 
-## SOCKS5 代理使用示例
+## SOCKS5 Proxy Usage Examples
 
-### 基本 SOCKS5 请求
+### Basic SOCKS5 Requests
 
 ```bash
-# 使用 curl 通过 SOCKS5 代理
+# Use curl through SOCKS5 proxy
 curl --socks5 socks_user:socks_password@localhost:1080 https://example.com
 
-# 设置环境变量
+# Set environment variables
 export ALL_PROXY=socks5://socks_user:socks_password@localhost:1080
 curl https://example.com
 ```
 
-### 调试工具
+### Debugging Tools
 
 ```bash
-# 使用 wscat 测试 WebSocket 连接
+# Use wscat to test WebSocket connection
 npm install -g wscat
 wscat -c wss://gateway.example.com:8443/ws
 
-# 使用 openssl 测试 TLS 连接
+# Use openssl to test TLS connection
 openssl s_client -connect gateway.example.com:8443
 
-# 查看网络连接
+# View network connections
 netstat -an | grep 8443
 ``` 
