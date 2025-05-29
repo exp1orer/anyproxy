@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  anyproxy-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+        COMMIT: ${COMMIT:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
+    container_name: anyproxy-gateway
+    ports:
+      - "8080:8080"   # HTTP proxy
+      - "1080:1080"   # SOCKS5 proxy
+      - "8443:8443"   # Gateway WebSocket
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./certs:/app/certs:ro
+      - anyproxy-logs:/app/logs
+    environment:
+      - LOG_LEVEL=info
+    command: ["./anyproxy-gateway", "--config", "configs/config.yaml"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pgrep", "anyproxy-gateway"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  anyproxy-client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+        COMMIT: ${COMMIT:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
+    container_name: anyproxy-client
+    depends_on:
+      anyproxy-gateway:
+        condition: service_healthy
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./certs:/app/certs:ro
+      - anyproxy-logs:/app/logs
+    environment:
+      - LOG_LEVEL=info
+      - GATEWAY_ADDR=anyproxy-gateway:8443
+    command: ["./anyproxy-client", "--config", "configs/config.yaml"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pgrep", "anyproxy-client"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  anyproxy-logs:
+    driver: local
+
+networks:
+  default:
+    name: anyproxy-network 
