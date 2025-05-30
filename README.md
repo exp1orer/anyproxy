@@ -3,8 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Version](https://img.shields.io/badge/Go-1.21+-blue.svg)](https://golang.org)
 [![Build Status](https://img.shields.io/badge/Build-Passing-green.svg)]()
-[![Release](https://img.shields.io/badge/Release-v1.0.0-green.svg)](https://github.com/buhuipao/anyproxy/relea
-ses)
+[![Release](https://img.shields.io/badge/Release-v1.0.0-green.svg)](https://github.com/buhuipao/anyproxy/releases)
 
 AnyProxy is a secure proxy system based on WebSocket + TLS that supports HTTP/HTTPS and SOCKS5 proxy protocols, helping you safely expose local services to external users.
 
