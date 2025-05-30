@@ -15,7 +15,6 @@ type Config struct {
 }
 
 // LogConfig represents the logging configuration
-
 type LogConfig struct {
 	Level      string `yaml:"level"`       // debug, info, warn, error
 	Format     string `yaml:"format"`      // text, json
@@ -94,6 +93,7 @@ func LoadConfig(filename string) (*Config, error) {
 	return &config, nil
 }
 
+// GetConfig returns the global configuration
 func GetConfig() *Config {
 	return conf
 }

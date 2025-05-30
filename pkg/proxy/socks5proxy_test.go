@@ -8,16 +8,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/buhuipao/anyproxy/pkg/config"
 )
 
 func TestNewSOCKS5Proxy(t *testing.T) {
 	tests := []struct {
 		name    string
 		config  *config.SOCKS5Config
-		dialFn  ProxyDialer
+		dialFn  Dialer
 		wantErr bool
 	}{
 		{
@@ -53,7 +54,7 @@ func TestSOCKS5Proxy_DialConn(t *testing.T) {
 	tests := []struct {
 		name     string
 		config   *config.SOCKS5Config
-		dialFn   ProxyDialer
+		dialFn   Dialer
 		network  string
 		addr     string
 		wantErr  bool
@@ -129,12 +130,11 @@ func TestSOCKS5Proxy_StartStop(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	// Test Stop
-	err = proxy.Stop()
-	// Stop may return an error due to closing the listener, which is expected
+	_ = proxy.Stop() // Stop may return an error due to closing the listener, which is expected
 	// We just verify it doesn't panic
 
 	// Test multiple stops (should be safe)
-	err = proxy.Stop()
+	_ = proxy.Stop() // Explicitly ignore error for multiple stops
 	// Multiple stops should be safe and not panic
 }
 

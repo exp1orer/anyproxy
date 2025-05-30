@@ -11,10 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/buhuipao/anyproxy/pkg/config"
 )
 
 func TestNewClient(t *testing.T) {

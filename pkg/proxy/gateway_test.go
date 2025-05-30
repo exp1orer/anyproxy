@@ -7,8 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/buhuipao/anyproxy/pkg/config"
 )
 
 func TestGatewayMultipleProxies(t *testing.T) {
@@ -213,7 +214,7 @@ func TestGateway_GetRandomClient(t *testing.T) {
 func TestClientConn_Basic(t *testing.T) {
 	client := &ClientConn{
 		ID:       "test-client",
-		Conns:    make(map[string]*ProxyConn),
+		Conns:    make(map[string]*Conn),
 		msgChans: make(map[string]chan map[string]interface{}),
 		stopCh:   make(chan struct{}),
 	}
@@ -305,7 +306,7 @@ func TestClientConn_CreateMessageChannel(t *testing.T) {
 func TestClientConn_CloseConnection(t *testing.T) {
 	client := &ClientConn{
 		ID:       "test-client",
-		Conns:    make(map[string]*ProxyConn),
+		Conns:    make(map[string]*Conn),
 		msgChans: make(map[string]chan map[string]interface{}),
 	}
 
@@ -313,7 +314,7 @@ func TestClientConn_CloseConnection(t *testing.T) {
 	pipe1, pipe2 := net.Pipe()
 	defer pipe1.Close()
 
-	proxyConn := &ProxyConn{
+	proxyConn := &Conn{
 		ID:        "test-conn",
 		LocalConn: pipe2,
 		Done:      make(chan struct{}),
@@ -342,7 +343,7 @@ func TestClientConn_StopBasic(t *testing.T) {
 	client := &ClientConn{
 		ID:       "test-client",
 		writeBuf: make(chan interface{}, 10),
-		Conns:    make(map[string]*ProxyConn),
+		Conns:    make(map[string]*Conn),
 		msgChans: make(map[string]chan map[string]interface{}),
 		stopCh:   make(chan struct{}),
 	}
@@ -351,7 +352,7 @@ func TestClientConn_StopBasic(t *testing.T) {
 	pipe1, pipe2 := net.Pipe()
 	defer pipe1.Close()
 
-	proxyConn := &ProxyConn{
+	proxyConn := &Conn{
 		ID:        "test-conn",
 		LocalConn: pipe2,
 		Done:      make(chan struct{}),
@@ -370,7 +371,7 @@ func TestProxyConn_Basic(t *testing.T) {
 	defer pipe1.Close()
 	defer pipe2.Close()
 
-	proxyConn := &ProxyConn{
+	proxyConn := &Conn{
 		ID:        "test-conn",
 		LocalConn: pipe2,
 		Done:      make(chan struct{}),

@@ -8,8 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/buhuipao/anyproxy/pkg/config"
 	"gopkg.in/natefinch/lumberjack.v2"
+
+	"github.com/buhuipao/anyproxy/pkg/config"
 )
 
 var defaultLogger *slog.Logger

@@ -13,9 +13,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/gorilla/websocket"
 	"github.com/rs/xid"
+
+	"github.com/buhuipao/anyproxy/pkg/config"
 )
 
 // Gateway represents the proxy gateway server
@@ -227,7 +228,7 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		Conn:     conn,
 		Writer:   writer,
 		writeBuf: writeBuf,
-		Conns:    make(map[string]*ProxyConn),
+		Conns:    make(map[string]*Conn),
 		msgChans: make(map[string]chan map[string]interface{}),
 		stopCh:   make(chan struct{}),
 	}
@@ -290,7 +291,7 @@ type ClientConn struct {
 	Writer     *WebSocketWriter
 	writeBuf   chan interface{}
 	ConnsMu    sync.RWMutex
-	Conns      map[string]*ProxyConn
+	Conns      map[string]*Conn
 	msgChans   map[string]chan map[string]interface{} // Message channels per connection
 	msgChansMu sync.RWMutex
 	stopOnce   sync.Once
@@ -298,8 +299,8 @@ type ClientConn struct {
 	wg         sync.WaitGroup
 }
 
-// ProxyConn represents a proxied connection
-type ProxyConn struct {
+// Conn represents a proxied connection
+type Conn struct {
 	ID        string
 	LocalConn net.Conn
 	Done      chan struct{}
@@ -315,7 +316,7 @@ func (c *ClientConn) dialNetwork(network, addr string) (net.Conn, error) {
 	pipe1, pipe2 := net.Pipe()
 
 	// Create proxy connection
-	proxyConn := &ProxyConn{
+	proxyConn := &Conn{
 		ID:        connID,
 		Done:      make(chan struct{}),
 		LocalConn: pipe2,
@@ -624,7 +625,7 @@ func (c *ClientConn) handleConnectResponseMessage(msg map[string]interface{}) {
 	c.closeConnection(connID)
 }
 
-func (c *ClientConn) handleConnection(proxyConn *ProxyConn) {
+func (c *ClientConn) handleConnection(proxyConn *Conn) {
 	connID := proxyConn.ID
 	slog.Debug("Starting to handle gateway connection", "conn_id", connID, "client_id", c.ID)
 

@@ -31,7 +31,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	var clients []*proxy.ProxyClient
+	var clients []*proxy.Client
 	for i := 0; i < cfg.Client.Replicas; i++ {
 		// Create and start client
 		client, err := proxy.NewClient(&cfg.Client)
@@ -62,7 +62,7 @@ func main() {
 	var stopWg sync.WaitGroup
 	for _, client := range clients {
 		stopWg.Add(1)
-		go func(c *proxy.ProxyClient) {
+		go func(c *proxy.Client) {
 			defer stopWg.Done()
 			if err := c.Stop(); err != nil {
 				slog.Error("Error shutting down client", "error", err)

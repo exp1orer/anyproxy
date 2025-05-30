@@ -13,9 +13,10 @@ import (
 
 	"encoding/base64"
 
-	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/buhuipao/anyproxy/pkg/config"
 )
 
 func TestNewHTTPProxy(t *testing.T) {

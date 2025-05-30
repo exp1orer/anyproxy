@@ -21,13 +21,13 @@ import (
 type httpProxy struct {
 	config     *config.HTTPConfig
 	server     *http.Server
-	dialFunc   ProxyDialer
+	dialFunc   Dialer
 	listenAddr string
 	listener   net.Listener
 }
 
 // NewHTTPProxy creates a new HTTP/HTTPS proxy
-func NewHTTPProxy(cfg *config.HTTPConfig, dialFunc ProxyDialer) (GatewayProxy, error) {
+func NewHTTPProxy(cfg *config.HTTPConfig, dialFunc Dialer) (GatewayProxy, error) {
 	proxy := &httpProxy{
 		config:     cfg,
 		dialFunc:   dialFunc,

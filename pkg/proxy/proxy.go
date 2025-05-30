@@ -17,8 +17,8 @@ type GatewayProxy interface {
 	DialConn(network, addr string) (net.Conn, error)
 }
 
-// ProxyDialer is a function type for creating network connections
-type ProxyDialer func(ctx context.Context, network, addr string) (net.Conn, error)
+// Dialer is a function type for creating network connections
+type Dialer func(ctx context.Context, network, addr string) (net.Conn, error)
 
 var _ GatewayProxy = &socks5Proxy{}
 var _ GatewayProxy = &httpProxy{}

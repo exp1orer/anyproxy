@@ -7,21 +7,22 @@ import (
 	"log/slog"
 	"net"
 
-	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/things-go/go-socks5"
+
+	"github.com/buhuipao/anyproxy/pkg/config"
 )
 
 // socks5Proxy implements the GatewayProxy interface for SOCKS5 protocol
 type socks5Proxy struct {
 	config     *config.SOCKS5Config
 	server     *socks5.Server
-	dialFunc   ProxyDialer
+	dialFunc   Dialer
 	listenAddr string
 	listener   net.Listener
 }
 
 // NewSOCKS5Proxy creates a new SOCKS5 proxy
-func NewSOCKS5Proxy(cfg *config.SOCKS5Config, dialFunc ProxyDialer) (GatewayProxy, error) {
+func NewSOCKS5Proxy(cfg *config.SOCKS5Config, dialFunc Dialer) (GatewayProxy, error) {
 	socks5Auths := []socks5.Authenticator{}
 	if cfg.AuthUsername != "" && cfg.AuthPassword != "" {
 		// Create authentication store with username/password from config
