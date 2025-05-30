@@ -7,6 +7,10 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: write
+  packages: write
+
 env:
   GO_VERSION: '1.21'
   PROJECT_NAME: anyproxy
@@ -234,7 +238,7 @@ jobs:
         fi
 
     - name: Create Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         name: Release ${{ steps.extract_notes.outputs.version }}
         body_path: release_notes.md
