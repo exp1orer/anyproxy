@@ -9,7 +9,6 @@ We have successfully configured a complete GitHub Actions automated build pipeli
 ```
 .github/
 ├── workflows/
-│   ├── ci.yml                    # Daily CI checks
 │   └── build-and-release.yml     # Build and release
 ├── .dockerignore                 # Docker build optimization
 ├── .golangci.yml                 # Code quality configuration
