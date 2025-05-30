@@ -19,19 +19,26 @@ import (
 
 // httpProxy implements the GatewayProxy interface for HTTP/HTTPS protocol
 type httpProxy struct {
-	config     *config.HTTPConfig
-	server     *http.Server
-	dialFunc   Dialer
-	listenAddr string
-	listener   net.Listener
+	config         *config.HTTPConfig
+	server         *http.Server
+	dialFunc       Dialer
+	groupExtractor GroupExtractor
+	listenAddr     string
+	listener       net.Listener
 }
 
 // NewHTTPProxy creates a new HTTP/HTTPS proxy
 func NewHTTPProxy(cfg *config.HTTPConfig, dialFunc Dialer) (GatewayProxy, error) {
+	return NewHTTPProxyWithAuth(cfg, dialFunc, nil)
+}
+
+// NewHTTPProxyWithAuth creates a new HTTP/HTTPS proxy with authentication support
+func NewHTTPProxyWithAuth(cfg *config.HTTPConfig, dialFunc Dialer, groupExtractor GroupExtractor) (GatewayProxy, error) {
 	proxy := &httpProxy{
-		config:     cfg,
-		dialFunc:   dialFunc,
-		listenAddr: cfg.ListenAddr,
+		config:         cfg,
+		dialFunc:       dialFunc,
+		groupExtractor: groupExtractor,
+		listenAddr:     cfg.ListenAddr,
 	}
 
 	// Create HTTP server with custom handler
@@ -107,62 +114,93 @@ func (h *httpProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // handleHTTP handles both HTTP and HTTPS requests
 func (h *httpProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
+	var userCtx *UserContext
+
 	// Check authentication if configured
 	if h.config.AuthUsername != "" && h.config.AuthPassword != "" {
-		if !h.authenticate(r) {
+		username, _, authenticated := h.authenticateAndExtractUser(r)
+		if !authenticated {
 			w.Header().Set("Proxy-Authenticate", "Basic realm=\"Proxy\"")
 			http.Error(w, "Proxy Authentication Required", http.StatusProxyAuthRequired)
 			return
+		}
+
+		// Create user context with group information
+		groupID := ""
+		if h.groupExtractor != nil {
+			groupID = h.groupExtractor(username)
+		}
+		userCtx = &UserContext{
+			Username: username,
+			GroupID:  groupID,
 		}
 	}
 
 	// Handle CONNECT method for HTTPS tunneling
 	if r.Method == http.MethodConnect {
-		h.handleConnect(w, r)
+		h.handleConnect(w, r, userCtx)
 		return
 	}
 
 	// Handle regular HTTP requests
-	h.handleHTTPRequest(w, r)
+	h.handleHTTPRequest(w, r, userCtx)
 }
 
-// authenticate checks proxy authentication
-func (h *httpProxy) authenticate(r *http.Request) bool {
+// authenticateAndExtractUser checks proxy authentication and returns username, password, and auth status
+func (h *httpProxy) authenticateAndExtractUser(r *http.Request) (string, string, bool) {
 	auth := r.Header.Get("Proxy-Authorization")
 	if auth == "" {
-		return false
+		return "", "", false
 	}
 
 	// Parse Basic authentication
 	const prefix = "Basic "
 	if !strings.HasPrefix(auth, prefix) {
-		return false
+		return "", "", false
 	}
 
 	decoded, err := base64.StdEncoding.DecodeString(auth[len(prefix):])
 	if err != nil {
-		return false
+		return "", "", false
 	}
 
 	credentials := string(decoded)
 	parts := strings.SplitN(credentials, ":", 2)
 	if len(parts) != 2 {
-		return false
+		return "", "", false
 	}
 
 	username, password := parts[0], parts[1]
-	return username == h.config.AuthUsername && password == h.config.AuthPassword
+
+	// Extract the base username (without group_id) for authentication
+	baseUsername := username
+	if strings.Contains(username, "@") {
+		// Split username@group_id and use only the username part for authentication
+		userParts := strings.SplitN(username, "@", 2)
+		baseUsername = userParts[0]
+	}
+
+	// Authenticate using the base username and provided password
+	authenticated := baseUsername == h.config.AuthUsername && password == h.config.AuthPassword
+
+	return username, password, authenticated
+}
+
+// authenticate checks proxy authentication (kept for backward compatibility)
+func (h *httpProxy) authenticate(r *http.Request) bool {
+	_, _, authenticated := h.authenticateAndExtractUser(r)
+	return authenticated
 }
 
 // handleConnect handles HTTPS CONNECT requests for tunneling
-func (h *httpProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
+func (h *httpProxy) handleConnect(w http.ResponseWriter, r *http.Request, userCtx *UserContext) {
 	// Extract target host and port
 	host := r.URL.Host
 	if !strings.Contains(host, ":") {
 		host += ":443" // Default HTTPS port
 	}
 
-	slog.Info("CONNECT request", "host", host)
+	slog.Info("CONNECT request", "host", host, "user", userCtx)
 
 	// Hijack the connection first to handle raw TCP tunneling
 	hijacker, ok := w.(http.Hijacker)
@@ -180,8 +218,14 @@ func (h *httpProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	defer clientConn.Close()
 
+	// Create context with user information
+	ctx := r.Context()
+	if userCtx != nil {
+		ctx = context.WithValue(ctx, "user", userCtx)
+	}
+
 	// Create connection to target through the dial function
-	targetConn, err := h.dialFunc(r.Context(), "tcp", host)
+	targetConn, err := h.dialFunc(ctx, "tcp", host)
 	if err != nil {
 		slog.Error("Failed to connect", "host", host, "error", err)
 		// Send error response manually since we've hijacked the connection
@@ -212,7 +256,7 @@ func (h *httpProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleHTTPRequest handles regular HTTP requests (non-CONNECT)
-func (h *httpProxy) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
+func (h *httpProxy) handleHTTPRequest(w http.ResponseWriter, r *http.Request, userCtx *UserContext) {
 	// Parse target URL
 	targetURL := r.URL
 	if !targetURL.IsAbs() {
@@ -229,7 +273,7 @@ func (h *httpProxy) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	slog.Info("HTTP request", "url", targetURL.String())
+	slog.Info("HTTP request", "url", targetURL.String(), "user", userCtx)
 
 	// Create connection to target
 	host := targetURL.Host
@@ -241,7 +285,13 @@ func (h *httpProxy) handleHTTPRequest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	targetConn, err := h.dialFunc(r.Context(), "tcp", host)
+	// Create context with user information
+	ctx := r.Context()
+	if userCtx != nil {
+		ctx = context.WithValue(ctx, "user", userCtx)
+	}
+
+	targetConn, err := h.dialFunc(ctx, "tcp", host)
 	if err != nil {
 		slog.Error("Failed to connect", "host", host, "error", err)
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)

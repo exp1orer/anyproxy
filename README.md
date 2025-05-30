@@ -12,26 +12,40 @@ AnyProxy is a secure, high-performance WebSocket + TLS based proxy system that e
 ### 🔐 Security First
 - **End-to-End TLS Encryption**: All communications use TLS 1.2+ encryption
 - **Multi-Layer Authentication**: Support for client authentication, proxy authentication, and access control
+- **Group-Based Authentication**: Support for `username@group-id` format with automatic group extraction
 - **Certificate-Based Security**: Support for custom domain certificates and client certificates
 - **Access Control Lists**: Configurable blacklist and whitelist mechanisms
 
-### 🚀 High Performance
+### 🚀 High Performance & Scalability
+- **Multi-Client Architecture**: Support for multiple clients with automatic load balancing
+- **Group-Based Routing**: Route requests to specific client groups for environment isolation
 - **Dual Proxy Support**: Run HTTP/HTTPS and SOCKS5 proxies simultaneously
-- **Load Balancing**: Automatic distribution across multiple client connections
+- **Load Balancing**: Automatic distribution across multiple client connections within groups
 - **Connection Pooling**: Efficient WebSocket connection reuse
 - **Concurrent Processing**: Support for thousands of concurrent connections
 
-### 🛠️ Developer Friendly
+### 🛠️ Developer & Enterprise Friendly
 - **Easy Deployment**: Simple configuration and deployment process
-- **Comprehensive Monitoring**: Built-in logging and metrics
+- **Multi-Tenant Support**: Isolate different environments (production, testing, development)
+- **Geographic Distribution**: Deploy client groups in different regions
+- **Comprehensive Monitoring**: Built-in logging and metrics with group-aware logging
 - **Flexible Configuration**: YAML-based configuration with environment variable support
 - **Production Ready**: Systemd integration and service management tools
 
-### 🌐 Protocol Support
-- **HTTP/HTTPS Proxy**: Full HTTP proxy protocol support including CONNECT method
+### 🌐 Advanced Protocol Support
+- **HTTP/HTTPS Proxy**: Full HTTP proxy protocol support including CONNECT method with group routing
 - **SOCKS5 Proxy**: Complete SOCKS5 implementation with authentication and **client-side DNS resolution**
 - **WebSocket Tunneling**: Secure WebSocket + TLS communication channel
 - **Multi-Protocol**: TCP and UDP traffic support
+- **Fallback Mechanism**: Automatic fallback to default group when specified group unavailable
+
+### 🏢 Enterprise Features
+- **Environment Isolation**: Separate client groups for production, testing, and development
+- **Service Segmentation**: Different groups can access different sets of services
+- **Multi-Tenant SaaS**: Support for tenant-specific routing and isolation
+- **Microservices Architecture**: Route different services through dedicated client groups
+- **Access Control**: Group-based restrictions and permissions
+- **Scalability**: Add more clients to any group for increased capacity
 
 ## 🚀 Quick Navigation
 
@@ -70,12 +84,14 @@ AnyProxy is a secure, high-performance WebSocket + TLS based proxy system that e
 
 ### ⚙️ Configuration and Usage
 - **[Basic Configuration](#basic-configuration)** - Essential settings
+- **[Group-Based Routing Guide](docs/GROUP_BASED_ROUTING.md)** - Complete group routing configuration and usage
 - **[Advanced Configuration](docs/DEPLOYMENT.md#advanced-configuration)** - Production-ready settings
-- **[Usage Examples](#usage-examples)** - HTTP and SOCKS5 proxy examples
+- **[Usage Examples](#usage-examples)** - HTTP and SOCKS5 proxy examples with group routing
 - **[Mobile Client Setup](#mobile-client-configuration)** - Mobile device configuration
 
 ### 🌐 Proxy Services
 - **[Dual Proxy Support](docs/DUAL_PROXY.md)** - HTTP and SOCKS5 proxy documentation
+- **[Group-Based Routing](docs/GROUP_BASED_ROUTING.md)** - Multi-tenant and environment isolation guide
 - **[SOCKS5 Client DNS](docs/SOCKS5_CLIENT_DNS.md)** - Client-side DNS resolution guide
 - **[HTTP Proxy Features](#http-proxy-usage)** - Detailed HTTP proxy usage
 - **[SOCKS5 Proxy Features](#socks5-proxy-usage)** - Comprehensive SOCKS5 documentation
@@ -94,25 +110,146 @@ AnyProxy is a secure, high-performance WebSocket + TLS based proxy system that e
 
 ## 📋 System Architecture
 
+### Multi-Client Group-Based Routing Architecture
+
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Public Users  │───▶│   Proxy Gateway  │───▶│   WebSocket     │───▶│  Target Service │
-│   (Internet)    │    │  HTTP + SOCKS5   │    │   TLS Tunnel    │    │   (LAN/WAN)     │
-└─────────────────┘    └──────────────────┘    └─────────────────┘    └─────────────────┘
+                                    ┌─────────────────────────────────────────────────────────────┐
+                                    │                    Proxy Gateway                            │
+                                    │  ┌─────────────────┐    ┌─────────────────┐                 │
+┌─────────────────┐                 │  │   HTTP Proxy    │    │  SOCKS5 Proxy   │                 │
+│   Public Users  │────────────────▶│  │   Port: 8080    │    │   Port: 1080    │                 │
+│   (Internet)    │                 │  │ user@group:pass │    │ user@group:pass │                 │
+│                 │                 │  └─────────────────┘    └─────────────────┘                 │
+│ • HTTP Requests │                 │           │                       │                         │
+│ • SOCKS5 Reqs   │                 │           └───────────┬───────────┘                         │
+│ • Group-based   │                 │                       │                                     │
+│   Authentication│                 │              ┌─────────────────┐                            │
+└─────────────────┘                 │              │  Group Router   │                            │
+                                    │              │                 │                            │
+                                    │              │ • Extract @group│                            │
+                                    │              │ • Select clients│                            │
+                                    │              │ • Load balancing│                            │
+                                    │              └─────────────────┘                            │
+                                    │                       │                                     │
+                                    │              ┌─────────────────┐                            │
+                                    │              │ WebSocket + TLS │                            │
+                                    │              │   Port: 8443    │                            │
+                                    │              └─────────────────┘                            │
+                                    └─────────────────────┼───────────────────────────────────────┘
+                                                          │
+                    ┌─────────────────────────────────────┼─────────────────────────────────────┐
+                    │                                     │                                     │
+                    ▼                                     ▼                                     ▼
+        ┌─────────────────────┐              ┌─────────────────────┐              ┌─────────────────────┐
+        │   Client Group A    │              │   Client Group B    │              │   Default Group     │
+        │   (Production)      │              │   (Testing)         │              │   (Development)     │
+        │                     │              │                     │              │                     │
+        │ ┌─────────────────┐ │              │ ┌─────────────────┐ │              │ ┌─────────────────┐ │
+        │ │ Client A1       │ │              │ │ Client B1       │ │              │ │ Client C1       │ │
+        │ │ ID: prod-01     │ │              │ │ ID: test-01     │ │              │ │ ID: dev-01      │ │
+        │ │ Group: prod     │ │              │ │ Group: testing  │ │              │ │ Group: ""       │ │
+        │ └─────────────────┘ │              │ └─────────────────┘ │              │ └─────────────────┘ │
+        │ ┌─────────────────┐ │              │ ┌─────────────────┐ │              │ ┌─────────────────┐ │
+        │ │ Client A2       │ │              │ │ Client B2       │ │              │ │ Client C2       │ │
+        │ │ ID: prod-02     │ │              │ │ ID: test-02     │ │              │ │ ID: dev-02      │ │
+        │ │ Group: prod     │ │              │ │ Group: testing  │ │              │ │ Group: ""       │ │
+        │ └─────────────────┘ │              │ └─────────────────┘ │              │ └─────────────────┘ │
+        └─────────────────────┘              └─────────────────────┘              └─────────────────────┘
+                    │                                     │                                     │
+                    ▼                                     ▼                                     ▼
+        ┌─────────────────────┐              ┌─────────────────────┐              ┌─────────────────────┐
+        │  Production Env     │              │   Testing Env       │              │  Development Env    │
+        │                     │              │                     │              │                     │
+        │ • Database Servers  │              │ • Test Databases    │              │ • Local Services    │
+        │ • API Services      │              │ • Staging APIs      │              │ • Debug Tools       │
+        │ • Internal Tools    │              │ • QA Tools          │              │ • Mock Services     │
+        └─────────────────────┘              └─────────────────────┘              └─────────────────────┘
+```
+
+### Group-Based Authentication Flow
+
+```
+User Request: curl -x http://user@production:pass@gateway:8080 https://api.example.com
+                                    │
+                                    ▼
+                        ┌─────────────────────┐
+                        │   Parse Username    │
+                        │                     │
+                        │ user@production     │
+                        │      ↓              │
+                        │ Base: user          │
+                        │ Group: production   │
+                        └─────────────────────┘
+                                    │
+                                    ▼
+                        ┌─────────────────────┐
+                        │   Authenticate      │
+                        │                     │
+                        │ Validate: user:pass │
+                        │ Against config      │
+                        └─────────────────────┘
+                                    │
+                                    ▼
+                        ┌─────────────────────┐
+                        │   Route to Group    │
+                        │                     │
+                        │ Select client from  │
+                        │ "production" group  │
+                        │ Fallback: default   │
+                        └─────────────────────┘
+                                    │
+                                    ▼
+                        ┌─────────────────────┐
+                        │   Forward Request   │
+                        │                     │
+                        │ Via WebSocket+TLS   │
+                        │ To selected client  │
+                        └─────────────────────┘
 ```
 
 ### Core Components
 
-1. **Gateway**: Accepts HTTP/SOCKS5 connections from public users and manages WebSocket connections from clients
-2. **Client**: Establishes secure WebSocket connections to the gateway and forwards requests to target services
-3. **Proxy Services**: HTTP and SOCKS5 proxy servers with independent configuration and authentication
+1. **Gateway**: 
+   - Accepts HTTP/SOCKS5 connections from public users
+   - Manages WebSocket connections from multiple client groups
+   - Implements group-based routing and load balancing
+   - Supports authentication with `username@group-id` format
+
+2. **Client Groups**: 
+   - Multiple clients can be organized into logical groups
+   - Each client specifies its `group_id` in configuration
+   - Clients in the same group provide redundancy and load distribution
+   - Groups enable environment isolation (production, testing, development)
+
+3. **Proxy Services**: 
+   - HTTP and SOCKS5 proxy servers with group-aware authentication
+   - Independent configuration and authentication for each protocol
+   - Automatic group extraction from username format
+
+4. **Group Router**:
+   - Extracts group information from authenticated usernames
+   - Selects appropriate client group for request forwarding
+   - Implements fallback to default group when specified group unavailable
+   - Provides load balancing within groups
 
 ### Data Flow
 
-1. **Client Registration**: Client proactively connects to gateway via WebSocket + TLS
-2. **User Connection**: Public users connect through HTTP or SOCKS5 proxy
-3. **Request Forwarding**: Gateway forwards requests to available clients
-4. **Service Access**: Client accesses target services and returns responses
+1. **Client Registration**: Multiple clients connect to gateway via WebSocket + TLS, each specifying their group
+2. **User Authentication**: Public users authenticate with `username@group-id:password` format
+3. **Group Extraction**: Gateway parses username to extract base username and group identifier
+4. **Authentication**: Base username and password validated against configuration
+5. **Group Routing**: Request routed to appropriate client group based on extracted group-id
+6. **Load Balancing**: Gateway selects available client from the target group
+7. **Request Forwarding**: Gateway forwards request to selected client via WebSocket tunnel
+8. **Service Access**: Client accesses target services and returns responses
+
+### Multi-Tenant Capabilities
+
+- **Environment Isolation**: Separate client groups for production, testing, and development
+- **Geographic Distribution**: Deploy client groups in different regions
+- **Service Segmentation**: Different groups can access different sets of services
+- **Access Control**: Group-based restrictions and permissions
+- **Scalability**: Add more clients to any group for increased capacity
 
 ## 🛠️ Installation and Setup
 
@@ -619,16 +756,18 @@ log:
   format: "text"
   output: "stdout"
 
-# Proxy configuration - supports both HTTP and SOCKS5
+# Proxy configuration - supports both HTTP and SOCKS5 with group-based routing
 proxy:
   http:
     listen_addr: ":8080"
-    auth_username: "http_user"
-    auth_password: "http_password"
+    auth_username: "http_user"      # Base username for authentication
+    auth_password: "http_password"  # Password for authentication
+    # Note: Users can authenticate with "http_user@group-id:http_password"
   socks5:
     listen_addr: ":1080"
-    auth_username: "socks_user"
-    auth_password: "socks_password"
+    auth_username: "socks_user"     # Base username for authentication  
+    auth_password: "socks_password" # Password for authentication
+    # Note: Users can authenticate with "socks_user@group-id:socks_password"
 
 # Gateway configuration
 gateway:
@@ -638,11 +777,12 @@ gateway:
   auth_username: "gateway_user"
   auth_password: "gateway_password"
 
-# Client configuration
+# Client configuration (single client example)
 client:
   gateway_addr: "127.0.0.1:8443"
   gateway_tls_cert: "certs/server.crt"
   client_id: "client-001"
+  group_id: "production"          # Specify which group this client belongs to
   replicas: 1
   max_concurrent_conns: 100
   auth_username: "gateway_user"
@@ -657,48 +797,409 @@ client:
       protocol: "tcp"
 ```
 
+### Multi-Group Client Configuration
+
+For production deployments with multiple client groups, create separate configuration files:
+
+#### Production Client Configuration (`configs/production-client.yaml`)
+
+```yaml
+log:
+  level: "info"
+  format: "json"
+  output: "stdout"
+
+client:
+  gateway_addr: "gateway.example.com:8443"
+  gateway_tls_cert: "certs/server.crt"
+  client_id: "prod-client-001"
+  group_id: "production"          # Production group
+  replicas: 3                     # Multiple replicas for high availability
+  max_concurrent_conns: 200
+  auth_username: "gateway_user"
+  auth_password: "gateway_password"
+  
+  # Production-specific restrictions
+  forbidden_hosts:
+    - "localhost"
+    - "127.0.0.1"
+    - "192.168.0.0/16"
+    - "10.0.0.0/8"
+  
+  # Production service limits
+  limit:
+    - name: "api-server"
+      addr: "api.prod.internal:443"
+      protocol: "tcp"
+    - name: "database"
+      addr: "db.prod.internal:5432"
+      protocol: "tcp"
+```
+
+#### Testing Client Configuration (`configs/testing-client.yaml`)
+
+```yaml
+log:
+  level: "debug"
+  format: "text"
+  output: "stdout"
+
+client:
+  gateway_addr: "gateway.example.com:8443"
+  gateway_tls_cert: "certs/server.crt"
+  client_id: "test-client-001"
+  group_id: "testing"             # Testing group
+  replicas: 2                     # Fewer replicas for testing
+  max_concurrent_conns: 100
+  auth_username: "gateway_user"
+  auth_password: "gateway_password"
+  
+  # Testing-specific configuration
+  forbidden_hosts:
+    - "localhost"
+    - "127.0.0.1"
+  
+  # Testing service limits
+  limit:
+    - name: "test-api"
+      addr: "api.test.internal:443"
+      protocol: "tcp"
+    - name: "test-db"
+      addr: "db.test.internal:5432"
+      protocol: "tcp"
+```
+
+#### Development Client Configuration (`configs/development-client.yaml`)
+
+```yaml
+log:
+  level: "debug"
+  format: "text"
+  output: "stdout"
+
+client:
+  gateway_addr: "gateway.example.com:8443"
+  gateway_tls_cert: "certs/server.crt"
+  client_id: "dev-client-001"
+  group_id: "development"         # Development group
+  replicas: 1                     # Single replica for development
+  max_concurrent_conns: 50
+  auth_username: "gateway_user"
+  auth_password: "gateway_password"
+  
+  # Development allows more access
+  allowed_hosts:
+    - ".*"                        # Allow all hosts for development
+  
+  # Development service limits (more permissive)
+  limit:
+    - name: "dev-services"
+      addr: "localhost:*"
+      protocol: "tcp"
+```
+
+#### Default Group Client Configuration (`configs/default-client.yaml`)
+
+```yaml
+log:
+  level: "info"
+  format: "text"
+  output: "stdout"
+
+client:
+  gateway_addr: "gateway.example.com:8443"
+  gateway_tls_cert: "certs/server.crt"
+  client_id: "default-client-001"
+  # group_id: ""                  # Default group (empty or omitted)
+  replicas: 1
+  max_concurrent_conns: 100
+  auth_username: "gateway_user"
+  auth_password: "gateway_password"
+  
+  # Default group restrictions
+  forbidden_hosts:
+    - "localhost"
+    - "127.0.0.1"
+    - "192.168.0.0/16"
+```
+
+### Geographic Distribution Configuration
+
+For geographic distribution, organize clients by region:
+
+#### US East Client Configuration (`configs/us-east-client.yaml`)
+
+```yaml
+client:
+  client_id: "us-east-001"
+  group_id: "us-east"
+  gateway_addr: "gateway.example.com:8443"
+  # ... other configuration
+  
+  # Region-specific service limits
+  limit:
+    - name: "us-east-api"
+      addr: "api.us-east.internal:443"
+      protocol: "tcp"
+    - name: "us-east-db"
+      addr: "db.us-east.internal:5432"
+      protocol: "tcp"
+```
+
+#### EU West Client Configuration (`configs/eu-west-client.yaml`)
+
+```yaml
+client:
+  client_id: "eu-west-001"
+  group_id: "eu-west"
+  gateway_addr: "gateway.example.com:8443"
+  # ... other configuration
+  
+  # Region-specific service limits
+  limit:
+    - name: "eu-west-api"
+      addr: "api.eu-west.internal:443"
+      protocol: "tcp"
+    - name: "eu-west-db"
+      addr: "db.eu-west.internal:5432"
+      protocol: "tcp"
+```
+
+### Docker Compose Configuration for Multi-Group Setup
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  gateway:
+    image: buhuipao/anyproxy:latest
+    command: ./anyproxy-gateway --config configs/gateway-config.yaml
+    ports:
+      - "8080:8080"
+      - "1080:1080"
+      - "8443:8443"
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  # Production clients
+  prod-client-1:
+    image: buhuipao/anyproxy:latest
+    command: ./anyproxy-client --config configs/production-client.yaml
+    environment:
+      - CLIENT_ID=prod-client-001
+      - GROUP_ID=production
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./logs:/app/logs
+    depends_on:
+      - gateway
+    restart: unless-stopped
+
+  prod-client-2:
+    image: buhuipao/anyproxy:latest
+    command: ./anyproxy-client --config configs/production-client.yaml
+    environment:
+      - CLIENT_ID=prod-client-002
+      - GROUP_ID=production
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./logs:/app/logs
+    depends_on:
+      - gateway
+    restart: unless-stopped
+
+  # Testing clients
+  test-client-1:
+    image: buhuipao/anyproxy:latest
+    command: ./anyproxy-client --config configs/testing-client.yaml
+    environment:
+      - CLIENT_ID=test-client-001
+      - GROUP_ID=testing
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./logs:/app/logs
+    depends_on:
+      - gateway
+    restart: unless-stopped
+
+  # Development client
+  dev-client-1:
+    image: buhuipao/anyproxy:latest
+    command: ./anyproxy-client --config configs/development-client.yaml
+    environment:
+      - CLIENT_ID=dev-client-001
+      - GROUP_ID=development
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./logs:/app/logs
+    depends_on:
+      - gateway
+    restart: unless-stopped
+
+  # Default group client
+  default-client-1:
+    image: buhuipao/anyproxy:latest
+    command: ./anyproxy-client --config configs/default-client.yaml
+    environment:
+      - CLIENT_ID=default-client-001
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./logs:/app/logs
+    depends_on:
+      - gateway
+    restart: unless-stopped
+```
+
+### Environment Variables for Group Configuration
+
+You can override configuration using environment variables:
+
+```bash
+# Gateway environment variables
+export LOG_LEVEL=info
+export HTTP_AUTH_USER=http_user
+export HTTP_AUTH_PASS=http_password
+export SOCKS5_AUTH_USER=socks_user
+export SOCKS5_AUTH_PASS=socks_password
+export GATEWAY_AUTH_USER=gateway_user
+export GATEWAY_AUTH_PASS=gateway_password
+
+# Client environment variables
+export GATEWAY_ADDR=gateway.example.com:8443
+export CLIENT_ID=prod-client-001
+export GROUP_ID=production
+export CLIENT_REPLICAS=3
+export MAX_CONCURRENT_CONNS=200
+export GATEWAY_AUTH_USER=gateway_user
+export GATEWAY_AUTH_PASS=gateway_password
+```
+
 ### Advanced Configuration
 
 For production deployments, see:
 - [Deployment Guide](docs/DEPLOYMENT.md) - Complete production setup
+- [Group-Based Routing Guide](docs/GROUP_BASED_ROUTING.md) - Detailed group routing configuration
 - [Configuration Examples](configs/) - Various configuration templates
 - [Security Hardening](docs/DEPLOYMENT.md#security-hardening) - Security best practices
 
 ## 🚀 Usage Examples
 
+### Group-Based Routing Examples
+
+AnyProxy supports group-based client routing, allowing you to route requests to specific client groups based on the username format `username@group-id`.
+
+#### Multi-Environment Setup
+
+```bash
+# Route to production environment clients
+curl -x http://user@production:password@127.0.0.1:8080 https://api.example.com
+
+# Route to testing environment clients  
+curl -x http://user@testing:password@127.0.0.1:8080 https://api.example.com
+
+# Route to development environment clients
+curl -x http://user@development:password@127.0.0.1:8080 https://api.example.com
+
+# Use default group (backward compatibility)
+curl -x http://user:password@127.0.0.1:8080 https://api.example.com
+```
+
+#### Geographic Distribution
+
+```bash
+# Route through US East clients
+curl -x http://user@us-east:password@127.0.0.1:8080 https://api.example.com
+
+# Route through EU West clients
+curl -x http://user@eu-west:password@127.0.0.1:8080 https://api.example.com
+
+# Route through Asia Pacific clients
+curl -x http://user@asia-pacific:password@127.0.0.1:8080 https://api.example.com
+```
+
+#### Client Configuration for Groups
+
+```yaml
+# Production client configuration
+client:
+  client_id: "prod-client-001"
+  group_id: "production"  # This client belongs to production group
+  gateway_addr: "gateway.example.com:8443"
+  # ... other configuration
+
+# Testing client configuration  
+client:
+  client_id: "test-client-001"
+  group_id: "testing"     # This client belongs to testing group
+  gateway_addr: "gateway.example.com:8443"
+  # ... other configuration
+
+# Default group client (no group_id specified)
+client:
+  client_id: "default-client-001"
+  # group_id: ""          # Default group (can be omitted)
+  gateway_addr: "gateway.example.com:8443"
+  # ... other configuration
+```
+
 ### HTTP Proxy Usage
 
 ```bash
-# Using curl with HTTP proxy
+# Basic HTTP proxy usage
 curl -x http://http_user:http_password@127.0.0.1:8080 https://example.com
 
-# Setting environment variables
-export http_proxy=http://http_user:http_password@127.0.0.1:8080
-export https_proxy=http://http_user:http_password@127.0.0.1:8080
+# Group-based HTTP proxy usage
+curl -x http://http_user@production:http_password@127.0.0.1:8080 https://example.com
+
+# Setting environment variables with group routing
+export http_proxy=http://http_user@production:http_password@127.0.0.1:8080
+export https_proxy=http://http_user@production:http_password@127.0.0.1:8080
 curl https://example.com
 
-# Browser configuration
+# Browser configuration with group routing
 # Proxy Type: HTTP
 # Address: 127.0.0.1
 # Port: 8080
-# Username: http_user
+# Username: http_user@production
 # Password: http_password
 ```
 
 ### SOCKS5 Proxy Usage
 
-AnyProxy's SOCKS5 proxy supports **client-side DNS resolution**, which means domain names are resolved by the client rather than the proxy server. This provides better privacy and allows clients to use their own DNS servers.
+AnyProxy's SOCKS5 proxy supports **client-side DNS resolution** and **group-based routing**, which means domain names are resolved by the client rather than the proxy server. This provides better privacy and allows clients to use their own DNS servers.
 
 ```bash
-# Using curl with SOCKS5 proxy (client-side DNS resolution)
+# Basic SOCKS5 proxy usage (client-side DNS resolution)
 curl --socks5 socks_user:socks_password@127.0.0.1:1080 https://example.com
 
-# Setting environment variables
-export ALL_PROXY=socks5://socks_user:socks_password@127.0.0.1:1080
+# Group-based SOCKS5 proxy usage
+curl --socks5 socks_user@production:socks_password@127.0.0.1:1080 https://example.com
+
+# Setting environment variables with group routing
+export ALL_PROXY=socks5://socks_user@production:socks_password@127.0.0.1:1080
 curl https://example.com
 
-# SSH tunneling through SOCKS5
+# SSH tunneling through SOCKS5 with group routing
 ssh -o ProxyCommand="nc -X 5 -x 127.0.0.1:1080 %h %p" user@target-server
+# Note: For group routing in SSH, configure the proxy with group-based credentials
+```
+
+#### Advanced SOCKS5 Group Routing
+
+```bash
+# Route database connections through production clients
+mysql -h db.example.com -u user -p \
+  --protocol=tcp \
+  --socket=/tmp/mysql.sock \
+  # Configure MySQL client to use SOCKS5 proxy: socks_user@production:password@127.0.0.1:1080
+
+# Route different services through different groups
+curl --socks5 user@api-group:pass@127.0.0.1:1080 https://api.service.com
+curl --socks5 user@db-group:pass@127.0.0.1:1080 https://db.service.com
+curl --socks5 user@cache-group:pass@127.0.0.1:1080 https://cache.service.com
 ```
 
 #### Client-Side DNS Resolution Benefits
@@ -711,12 +1212,187 @@ ssh -o ProxyCommand="nc -X 5 -x 127.0.0.1:1080 %h %p" user@target-server
 
 For detailed information about client-side DNS resolution, see [SOCKS5 Client DNS Documentation](docs/SOCKS5_CLIENT_DNS.md).
 
+### Programmatic Usage with Groups
+
+#### Go HTTP Client with Group Routing
+
+```go
+package main
+
+import (
+    "fmt"
+    "net/http"
+    "net/url"
+)
+
+func main() {
+    // Configure HTTP proxy with group routing
+    proxyURL, _ := url.Parse("http://user@production:password@gateway.example.com:8080")
+    
+    transport := &http.Transport{
+        Proxy: http.ProxyURL(proxyURL),
+    }
+    
+    client := &http.Client{
+        Transport: transport,
+    }
+    
+    // All requests will be routed through production group clients
+    resp, err := client.Get("https://api.example.com/data")
+    if err != nil {
+        fmt.Printf("Error: %v\n", err)
+        return
+    }
+    defer resp.Body.Close()
+    
+    fmt.Printf("Response status: %s\n", resp.Status)
+}
+```
+
+#### Go SOCKS5 Client with Group Routing
+
+```go
+package main
+
+import (
+    "fmt"
+    "net"
+    "net/url"
+    
+    "golang.org/x/net/proxy"
+)
+
+func main() {
+    // Configure SOCKS5 proxy with group routing
+    proxyURL := "socks5://user@production:password@gateway.example.com:1080"
+    u, _ := url.Parse(proxyURL)
+    
+    // Create SOCKS5 dialer
+    dialer, err := proxy.FromURL(u, proxy.Direct)
+    if err != nil {
+        fmt.Printf("Error creating dialer: %v\n", err)
+        return
+    }
+    
+    // Connect through production group clients
+    conn, err := dialer.Dial("tcp", "api.example.com:443")
+    if err != nil {
+        fmt.Printf("Error connecting: %v\n", err)
+        return
+    }
+    defer conn.Close()
+    
+    fmt.Println("Connected through production group!")
+}
+```
+
+### Load Balancing and Failover
+
+When multiple clients are configured in the same group, AnyProxy automatically provides load balancing and failover:
+
+```bash
+# Multiple clients in production group provide automatic load balancing
+# Client 1: group_id: "production", client_id: "prod-01"
+# Client 2: group_id: "production", client_id: "prod-02"  
+# Client 3: group_id: "production", client_id: "prod-03"
+
+# All these requests will be distributed across available production clients
+curl -x http://user@production:pass@gateway:8080 https://api1.example.com
+curl -x http://user@production:pass@gateway:8080 https://api2.example.com
+curl -x http://user@production:pass@gateway:8080 https://api3.example.com
+```
+
+### Fallback Mechanism
+
+If the specified group has no available clients, requests automatically fall back to the default group:
+
+```bash
+# If "staging" group has no clients, falls back to default group
+curl -x http://user@staging:pass@gateway:8080 https://api.example.com
+
+# Logs will show:
+# WARN No clients available in group 'staging', falling back to default
+# INFO Selected client from default group client_id=default-client-001
+```
+
 ### Mobile Client Configuration
 
-For mobile devices using Clash for Android:
+For mobile devices using Clash for Android with group routing:
+
+```yaml
+# Clash configuration with group-based proxies
+proxies:
+  - name: "AnyProxy-Production"
+    type: http
+    server: gateway.example.com
+    port: 8080
+    username: "user@production"
+    password: "password"
+    
+  - name: "AnyProxy-Testing"
+    type: http
+    server: gateway.example.com
+    port: 8080
+    username: "user@testing"
+    password: "password"
+
+proxy-groups:
+  - name: "Environment-Select"
+    type: select
+    proxies:
+      - "AnyProxy-Production"
+      - "AnyProxy-Testing"
+      - "DIRECT"
+
+rules:
+  - DOMAIN-SUFFIX,prod.example.com,AnyProxy-Production
+  - DOMAIN-SUFFIX,test.example.com,AnyProxy-Testing
+  - MATCH,Environment-Select
+```
+
+For more mobile configuration examples:
 - [Clash Configuration Guide](configs/clash-android-usage.md)
 - [Simple Configuration](configs/clash-android-simple.yaml)
 - [Advanced Configuration](configs/clash-android.yaml)
+
+### Enterprise Use Cases
+
+#### Multi-Tenant SaaS Platform
+
+```bash
+# Tenant A routes to dedicated client group
+curl -x http://tenant-a@prod:secret@proxy:8080 https://api.saas.com/tenant-a/data
+
+# Tenant B routes to different client group  
+curl -x http://tenant-b@prod:secret@proxy:8080 https://api.saas.com/tenant-b/data
+
+# Development tenant routes to dev environment
+curl -x http://tenant-dev@dev:secret@proxy:8080 https://api.saas.com/dev/data
+```
+
+#### Microservices Architecture
+
+```bash
+# Route to API gateway clients
+curl -x http://api@gateway-group:pass@proxy:8080 https://api.internal.com
+
+# Route to database proxy clients
+curl -x http://db@database-group:pass@proxy:8080 https://db.internal.com
+
+# Route to cache proxy clients  
+curl -x http://cache@cache-group:pass@proxy:8080 https://cache.internal.com
+```
+
+#### Geographic Load Distribution
+
+```bash
+# Automatically route to nearest region based on group
+curl -x http://user@us-west:pass@proxy:8080 https://api.example.com    # Routes to US West clients
+curl -x http://user@eu-central:pass@proxy:8080 https://api.example.com # Routes to EU Central clients
+curl -x http://user@asia-east:pass@proxy:8080 https://api.example.com  # Routes to Asia East clients
+```
+
+For comprehensive group-based routing documentation, see [Group-Based Routing Guide](docs/GROUP_BASED_ROUTING.md).
 
 ## 📁 Project Structure
 

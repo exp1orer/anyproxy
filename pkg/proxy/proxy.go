@@ -5,6 +5,15 @@ import (
 	"net"
 )
 
+// UserContext contains user authentication information for proxy requests
+type UserContext struct {
+	Username string
+	GroupID  string
+}
+
+// GroupExtractor is a function type for extracting group ID from username
+type GroupExtractor func(username string) string
+
 // GatewayProxy defines the interface for different proxy implementations
 type GatewayProxy interface {
 	// Start starts the proxy server

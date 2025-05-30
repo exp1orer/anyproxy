@@ -37,6 +37,7 @@ client:
   gateway_addr: "wss://your-gateway.example.com:8443/ws"
   gateway_tls_cert: "certs/server.crt"
   client_id: "client-001"
+  group_id: "group-a"  # This client belongs to group-a
   replicas: 1
   auth_username: "gateway_user"
   auth_password: "gateway_pass"

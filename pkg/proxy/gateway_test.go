@@ -163,11 +163,15 @@ func TestGatewayNoProxies(t *testing.T) {
 func TestGateway_ClientConnManagement(t *testing.T) {
 	gateway := &Gateway{
 		clients: make(map[string]*ClientConn),
+		groups:  make(map[string]map[string]struct{}),
 	}
+	// Initialize the default group
+	gateway.groups[""] = make(map[string]struct{})
 
 	// Test adding client
 	client := &ClientConn{
-		ID: "test-client-1",
+		ID:      "test-client-1",
+		GroupID: "", // Default group
 	}
 	gateway.addClient(client)
 
@@ -179,20 +183,31 @@ func TestGateway_ClientConnManagement(t *testing.T) {
 	assert.True(t, exists)
 	assert.Equal(t, client, storedClient)
 
+	// Verify client was added to group
+	gateway.clientsMu.RLock()
+	_, groupExists := gateway.groups[""]["test-client-1"]
+	gateway.clientsMu.RUnlock()
+	assert.True(t, groupExists)
+
 	// Test removing client
 	gateway.removeClient("test-client-1")
 
 	gateway.clientsMu.RLock()
 	_, exists = gateway.clients["test-client-1"]
+	_, groupExists = gateway.groups[""]["test-client-1"]
 	gateway.clientsMu.RUnlock()
 
 	assert.False(t, exists)
+	assert.False(t, groupExists)
 }
 
 func TestGateway_GetRandomClient(t *testing.T) {
 	gateway := &Gateway{
 		clients: make(map[string]*ClientConn),
+		groups:  make(map[string]map[string]struct{}),
 	}
+	// Initialize the default group
+	gateway.groups[""] = make(map[string]struct{})
 
 	// Test no clients available
 	_, err := gateway.getRandomClient()
@@ -201,7 +216,8 @@ func TestGateway_GetRandomClient(t *testing.T) {
 
 	// Add a client
 	client := &ClientConn{
-		ID: "test-client-1",
+		ID:      "test-client-1",
+		GroupID: "", // Default group
 	}
 	gateway.addClient(client)
 

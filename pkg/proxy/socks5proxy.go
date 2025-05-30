@@ -6,43 +6,109 @@ import (
 	"log"
 	"log/slog"
 	"net"
+	"strings"
 
 	"github.com/things-go/go-socks5"
 
 	"github.com/buhuipao/anyproxy/pkg/config"
 )
 
+// GroupBasedCredentialStore implements CredentialStore interface with support for group-based usernames
+type GroupBasedCredentialStore struct {
+	ConfigUsername string
+	ConfigPassword string
+}
+
+// Valid implements the CredentialStore interface
+// Supports usernames in format "username@group_id" by extracting the base username for authentication
+func (g *GroupBasedCredentialStore) Valid(user, password, userAddr string) bool {
+	// Extract the base username (without group_id) for authentication
+	baseUsername := user
+	if strings.Contains(user, "@") {
+		// Split username@group_id and use only the username part for authentication
+		userParts := strings.SplitN(user, "@", 2)
+		baseUsername = userParts[0]
+	}
+
+	// Authenticate using the base username and provided password
+	return baseUsername == g.ConfigUsername && password == g.ConfigPassword
+}
+
 // socks5Proxy implements the GatewayProxy interface for SOCKS5 protocol
 type socks5Proxy struct {
-	config     *config.SOCKS5Config
-	server     *socks5.Server
-	dialFunc   Dialer
-	listenAddr string
-	listener   net.Listener
+	config         *config.SOCKS5Config
+	server         *socks5.Server
+	dialFunc       Dialer
+	groupExtractor GroupExtractor
+	listenAddr     string
+	listener       net.Listener
 }
 
 // NewSOCKS5Proxy creates a new SOCKS5 proxy
 func NewSOCKS5Proxy(cfg *config.SOCKS5Config, dialFunc Dialer) (GatewayProxy, error) {
+	return NewSOCKS5ProxyWithAuth(cfg, dialFunc, nil)
+}
+
+// NewSOCKS5ProxyWithAuth creates a new SOCKS5 proxy with authentication support
+func NewSOCKS5ProxyWithAuth(cfg *config.SOCKS5Config, dialFunc Dialer, groupExtractor GroupExtractor) (GatewayProxy, error) {
 	socks5Auths := []socks5.Authenticator{}
+
 	if cfg.AuthUsername != "" && cfg.AuthPassword != "" {
-		// Create authentication store with username/password from config
-		socks5Auths = append(socks5Auths, &socks5.UserPassAuthenticator{Credentials: socks5.StaticCredentials{
-			cfg.AuthUsername: cfg.AuthPassword,
-		}})
+		// Use the built-in UserPassAuthenticator with our custom credential store
+		credStore := &GroupBasedCredentialStore{
+			ConfigUsername: cfg.AuthUsername,
+			ConfigPassword: cfg.AuthPassword,
+		}
+		socks5Auths = append(socks5Auths, socks5.UserPassAuthenticator{
+			Credentials: credStore,
+		})
 	}
 
-	// Create SOCKS5 server
+	// Create a wrapper dial function that can extract group information from the request
+	wrappedDialFunc := func(ctx context.Context, network, addr string, request *socks5.Request) (net.Conn, error) {
+		var userCtx *UserContext
+
+		// Extract user information from the request's AuthContext
+		if request.AuthContext != nil && request.AuthContext.Payload != nil {
+			if username, exists := request.AuthContext.Payload["username"]; exists {
+				groupID := ""
+				if groupExtractor != nil {
+					groupID = groupExtractor(username)
+				}
+				userCtx = &UserContext{
+					Username: username,
+					GroupID:  groupID,
+				}
+				slog.Info("SOCKS5 extracted user info", "username", username, "group_id", groupID)
+			}
+		}
+
+		// If no user context was extracted, create a default one
+		if userCtx == nil {
+			userCtx = &UserContext{
+				Username: "socks5-user", // Default username for SOCKS5
+				GroupID:  "",            // Default group
+			}
+		}
+
+		// Add user context to the context
+		ctx = context.WithValue(ctx, "user", userCtx)
+		return dialFunc(ctx, network, addr)
+	}
+
+	// Create SOCKS5 server with the enhanced dial function
 	server := socks5.NewServer(
 		socks5.WithAuthMethods(socks5Auths),
-		socks5.WithDial(dialFunc),
+		socks5.WithDialAndRequest(wrappedDialFunc),
 		socks5.WithLogger(socks5.NewLogger(log.Default())),
 	)
 
 	return &socks5Proxy{
-		config:     cfg,
-		server:     server,
-		dialFunc:   dialFunc,
-		listenAddr: cfg.ListenAddr,
+		config:         cfg,
+		server:         server,
+		dialFunc:       dialFunc,
+		groupExtractor: groupExtractor,
+		listenAddr:     cfg.ListenAddr,
 	}, nil
 }
 

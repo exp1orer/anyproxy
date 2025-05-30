@@ -67,6 +67,7 @@ type ClientConfig struct {
 	GatewayAddr    string   `yaml:"gateway_addr"`
 	GatewayTLSCert string   `yaml:"gateway_tls_cert"`
 	ClientID       string   `yaml:"client_id"`
+	GroupID        string   `yaml:"group_id"`
 	Replicas       int      `yaml:"replicas"`
 	AuthUsername   string   `yaml:"auth_username"`
 	AuthPassword   string   `yaml:"auth_password"`

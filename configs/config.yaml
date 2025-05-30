@@ -31,6 +31,7 @@ client:
   gateway_addr: "127.0.0.1:8443"
   gateway_tls_cert: "certs/server.crt"
   client_id: "client"
+  group_id: "example-group"
   replicas: 1
   auth_username: "gateway_user"
   auth_password: "gateway_password"

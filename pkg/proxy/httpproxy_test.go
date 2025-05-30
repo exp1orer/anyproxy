@@ -465,3 +465,84 @@ func (m *mockConnWithWriter) SetReadDeadline(t time.Time) error {
 func (m *mockConnWithWriter) SetWriteDeadline(t time.Time) error {
 	return nil
 }
+
+// TestHTTPProxy_AuthenticateWithGroupID tests authentication with group-based usernames
+func TestHTTPProxy_AuthenticateWithGroupID(t *testing.T) {
+	tests := []struct {
+		name           string
+		configUsername string
+		configPassword string
+		authUsername   string
+		authPassword   string
+		expectedAuth   bool
+		expectedUser   string
+	}{
+		{
+			name:           "valid credentials with group ID",
+			configUsername: "testuser",
+			configPassword: "testpass",
+			authUsername:   "testuser@production",
+			authPassword:   "testpass",
+			expectedAuth:   true,
+			expectedUser:   "testuser@production",
+		},
+		{
+			name:           "valid credentials without group ID",
+			configUsername: "testuser",
+			configPassword: "testpass",
+			authUsername:   "testuser",
+			authPassword:   "testpass",
+			expectedAuth:   true,
+			expectedUser:   "testuser",
+		},
+		{
+			name:           "invalid username with group ID",
+			configUsername: "testuser",
+			configPassword: "testpass",
+			authUsername:   "wronguser@production",
+			authPassword:   "testpass",
+			expectedAuth:   false,
+			expectedUser:   "wronguser@production",
+		},
+		{
+			name:           "invalid password with group ID",
+			configUsername: "testuser",
+			configPassword: "testpass",
+			authUsername:   "testuser@production",
+			authPassword:   "wrongpass",
+			expectedAuth:   false,
+			expectedUser:   "testuser@production",
+		},
+		{
+			name:           "valid username with multiple @ symbols",
+			configUsername: "testuser",
+			configPassword: "testpass",
+			authUsername:   "testuser@prod@env",
+			authPassword:   "testpass",
+			expectedAuth:   true,
+			expectedUser:   "testuser@prod@env",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			proxy := &httpProxy{
+				config: &config.HTTPConfig{
+					AuthUsername: tt.configUsername,
+					AuthPassword: tt.configPassword,
+				},
+			}
+
+			// Create request with Basic auth
+			req := httptest.NewRequest("GET", "http://example.com", nil)
+			auth := base64.StdEncoding.EncodeToString([]byte(tt.authUsername + ":" + tt.authPassword))
+			req.Header.Set("Proxy-Authorization", "Basic "+auth)
+
+			username, password, authenticated := proxy.authenticateAndExtractUser(req)
+
+			assert.Equal(t, tt.expectedAuth, authenticated)
+			assert.Equal(t, tt.expectedUser, username)
+			assert.Equal(t, tt.authPassword, password)
+		})
+	}
+}

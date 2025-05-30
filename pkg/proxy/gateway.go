@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +28,7 @@ type Gateway struct {
 	upgrader   websocket.Upgrader
 	clientsMu  sync.RWMutex
 	clients    map[string]*ClientConn
+	groups     map[string]map[string]struct{}
 	stopCh     chan struct{}
 	wg         sync.WaitGroup
 }
@@ -36,6 +38,7 @@ func NewGateway(cfg *config.Config) (*Gateway, error) {
 	gateway := &Gateway{
 		config:  &cfg.Gateway,
 		clients: make(map[string]*ClientConn),
+		groups:  make(map[string]map[string]struct{}),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true
@@ -43,11 +46,19 @@ func NewGateway(cfg *config.Config) (*Gateway, error) {
 		},
 		stopCh: make(chan struct{}),
 	}
+	// Init the default group
+	gateway.groups[""] = make(map[string]struct{})
 
 	// Create a custom dial function that uses WebSocket connections
 	dialFn := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		// Get a random client
-		client, err := gateway.getRandomClient()
+		// Extract user context from context if available
+		var groupID string
+		if userCtx, ok := ctx.Value("user").(*UserContext); ok {
+			groupID = userCtx.GroupID
+		}
+
+		// Get a client from the specified group
+		client, err := gateway.getClientByGroup(groupID)
 		if err != nil {
 			return nil, err
 		}
@@ -59,7 +70,7 @@ func NewGateway(cfg *config.Config) (*Gateway, error) {
 
 	// Create HTTP proxy if configured
 	if cfg.Proxy.HTTP.ListenAddr != "" {
-		httpProxy, err := NewHTTPProxy(&cfg.Proxy.HTTP, dialFn)
+		httpProxy, err := NewHTTPProxyWithAuth(&cfg.Proxy.HTTP, dialFn, gateway.extractGroupFromUsername)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create HTTP proxy: %v", err)
 		}
@@ -69,7 +80,7 @@ func NewGateway(cfg *config.Config) (*Gateway, error) {
 
 	// Create SOCKS5 proxy if configured
 	if cfg.Proxy.SOCKS5.ListenAddr != "" {
-		socks5Proxy, err := NewSOCKS5Proxy(&cfg.Proxy.SOCKS5, dialFn)
+		socks5Proxy, err := NewSOCKS5ProxyWithAuth(&cfg.Proxy.SOCKS5, dialFn, gateway.extractGroupFromUsername)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create SOCKS5 proxy: %v", err)
 		}
@@ -85,6 +96,16 @@ func NewGateway(cfg *config.Config) (*Gateway, error) {
 	gateway.proxies = proxies
 
 	return gateway, nil
+}
+
+// extractGroupFromUsername extracts group ID from username
+// Expected format: username@group-id or just username (uses default group)
+func (g *Gateway) extractGroupFromUsername(username string) string {
+	parts := strings.Split(username, "@")
+	if len(parts) == 2 {
+		return parts[1] // Return group-id part
+	}
+	return "" // Default group
 }
 
 // Start starts the gateway
@@ -203,6 +224,9 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// If the group-id is empty, then the client will be add to the default group
+	groupID := r.Header.Get("X-Group-ID")
+
 	// Authenticate client
 	username, password, ok := r.BasicAuth()
 	if !ok || username != g.config.AuthUsername || password != g.config.AuthPassword {
@@ -225,6 +249,7 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Create and register client
 	client := &ClientConn{
 		ID:       clientID,
+		GroupID:  groupID,
 		Conn:     conn,
 		Writer:   writer,
 		writeBuf: writeBuf,
@@ -234,7 +259,7 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	g.addClient(client)
-	slog.Info("Client connected", "client_id", clientID)
+	slog.Info("Client connected", "client_id", clientID, "group_id", groupID)
 
 	// Handle incoming messages from the client
 	g.wg.Add(1)
@@ -254,30 +279,60 @@ func (g *Gateway) addClient(client *ClientConn) {
 	g.clientsMu.Lock()
 	defer g.clientsMu.Unlock()
 	g.clients[client.ID] = client
+	if _, ok := g.groups[client.GroupID]; !ok {
+		g.groups[client.GroupID] = make(map[string]struct{})
+	}
+	g.groups[client.GroupID][client.ID] = struct{}{}
 }
 
 // removeClient removes a client from the gateway
 func (g *Gateway) removeClient(clientID string) {
 	g.clientsMu.Lock()
 	defer g.clientsMu.Unlock()
+
+	// Find and remove client from groups
+	for _, clients := range g.groups {
+		if _, exists := clients[clientID]; exists {
+			delete(clients, clientID)
+			break
+		}
+	}
+
 	delete(g.clients, clientID)
 }
 
 // getRandomClient returns a random available client
 func (g *Gateway) getRandomClient() (*ClientConn, error) {
+	return g.getClientByGroup("")
+}
+
+// getClientByGroup returns a random available client from the specified group
+func (g *Gateway) getClientByGroup(groupID string) (*ClientConn, error) {
 	g.clientsMu.RLock()
 	defer g.clientsMu.RUnlock()
 
-	if len(g.clients) == 0 {
-		return nil, fmt.Errorf("no clients available")
+	// Get clients from the specified group
+	clientIDs, exists := g.groups[groupID]
+	if !exists || len(clientIDs) == 0 {
+		// If no clients in specified group, try default group
+		if groupID != "" {
+			clientIDs, exists = g.groups[""]
+			if !exists || len(clientIDs) == 0 {
+				return nil, fmt.Errorf("no clients available in group '%s' or default group", groupID)
+			}
+		} else {
+			return nil, fmt.Errorf("no clients available in default group")
+		}
 	}
 
-	// Return the first available client (simple implementation)
-	for _, client := range g.clients {
-		return client, nil
+	// Return the first available client from the group (simple implementation)
+	for clientID := range clientIDs {
+		if client, exists := g.clients[clientID]; exists {
+			return client, nil
+		}
 	}
 
-	return nil, fmt.Errorf("no clients available")
+	return nil, fmt.Errorf("no clients available in group '%s'", groupID)
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -287,6 +342,7 @@ func (g *Gateway) getRandomClient() (*ClientConn, error) {
 // ClientConn represents a connected proxy client
 type ClientConn struct {
 	ID         string
+	GroupID    string
 	Conn       *websocket.Conn
 	Writer     *WebSocketWriter
 	writeBuf   chan interface{}

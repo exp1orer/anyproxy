@@ -1,0 +1,109 @@
+# Group-Based Proxy Configuration Example
+# This configuration demonstrates how to use group-based client selection
+# based on the username provided during proxy authentication
+
+log:
+  level: "info"
+  format: "text"
+  output: "stdout"
+
+# Gateway configuration for WebSocket connections from clients
+gateway:
+  listen_addr: "0.0.0.0:8443"
+  tls_cert: "certs/server.crt"
+  tls_key: "certs/server.key"
+  auth_username: "gateway_user"
+  auth_password: "gateway_password"
+
+# Proxy configuration - both HTTP and SOCKS5 support group-based routing
+proxy:
+  # HTTP proxy configuration
+  http:
+    listen_addr: "0.0.0.0:8080"
+    auth_username: "proxy_user"  # This will be ignored for group extraction
+    auth_password: "proxy_pass"  # This password will be validated
+  
+  # SOCKS5 proxy configuration
+  socks5:
+    listen_addr: "0.0.0.0:1080"
+    auth_username: "proxy_user"  # This will be ignored for group extraction
+    auth_password: "proxy_pass"  # This password will be validated
+
+# Client configuration examples for different groups
+client:
+  gateway_addr: "127.0.0.1:8443"
+  gateway_tls_cert: "certs/server.crt"
+  client_id: "client-group-a"
+  group_id: "group-a"  # This client belongs to group-a
+  replicas: 1
+  auth_username: "gateway_user"
+  auth_password: "gateway_password"
+  forbidden_hosts:
+    - "localhost"
+    - "127.0.0.1"
+  allowed_hosts:
+    - ".*"
+
+# Usage Examples:
+#
+# 1. HTTP Proxy with group selection:
+#    curl -x http://user@group-a:proxy_pass@localhost:8080 https://example.com
+#    curl -x http://user@group-b:proxy_pass@localhost:8080 https://example.com
+#    curl -x http://user:proxy_pass@localhost:8080 https://example.com  # Uses default group
+#
+# 2. SOCKS5 Proxy with group selection:
+#    curl --socks5 user@group-a:proxy_pass@localhost:1080 https://example.com
+#    curl --socks5 user@group-b:proxy_pass@localhost:1080 https://example.com
+#    curl --socks5 user:proxy_pass@localhost:1080 https://example.com  # Uses default group
+#
+# 3. Multiple clients in different groups:
+#    - Start client with group_id: "group-a"
+#    - Start client with group_id: "group-b"  
+#    - Start client with group_id: ""  # Default group
+#
+# Group Selection Logic:
+# - Username format: "username@group-id"
+# - If no "@" in username, uses default group ("")
+# - If specified group has no clients, falls back to default group
+# - If no clients available in any group, connection fails
+
+# Example client configurations for different environments:
+
+# Production Client Configuration (production-client.yaml):
+# client:
+#   gateway_addr: "gateway.company.com:8443"
+#   gateway_tls_cert: "certs/server.crt"
+#   client_id: "prod-client-001"
+#   group_id: "production"
+#   replicas: 3
+#   auth_username: "gateway_user"
+#   auth_password: "gateway_password"
+#   forbidden_hosts:
+#     - "localhost"
+#     - "127.0.0.1"
+#     - "192.168.0.0/16"
+
+# Testing Client Configuration (testing-client.yaml):
+# client:
+#   gateway_addr: "gateway.company.com:8443"
+#   gateway_tls_cert: "certs/server.crt"
+#   client_id: "test-client-001"
+#   group_id: "testing"
+#   replicas: 2
+#   auth_username: "gateway_user"
+#   auth_password: "gateway_password"
+#   forbidden_hosts:
+#     - "localhost"
+#     - "127.0.0.1"
+
+# Development Client Configuration (development-client.yaml):
+# client:
+#   gateway_addr: "gateway.company.com:8443"
+#   gateway_tls_cert: "certs/server.crt"
+#   client_id: "dev-client-001"
+#   group_id: "development"
+#   replicas: 1
+#   auth_username: "gateway_user"
+#   auth_password: "gateway_password"
+#   allowed_hosts:
+#     - ".*"  # Allow all hosts for development 

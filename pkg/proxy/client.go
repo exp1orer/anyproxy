@@ -196,6 +196,8 @@ func (c *Client) connect() error {
 	// Set up headers
 	headers := http.Header{}
 	headers.Set("X-Client-ID", c.generateClientID())
+	headers.Set("X-Group-ID", c.config.GroupID)
+	slog.Info("Connecting to gateway", "url", gatewayURL.String(), "headers", headers)
 
 	// Use Basic Auth for authentication
 	auth := base64.StdEncoding.EncodeToString(

@@ -238,3 +238,74 @@ func TestDialConn(t *testing.T) {
 		t.Fatal("DialConn didn't return the expected connection")
 	}
 }
+
+// TestGroupBasedCredentialStore tests the credential store with group-based usernames
+func TestGroupBasedCredentialStore(t *testing.T) {
+	tests := []struct {
+		name           string
+		configUsername string
+		configPassword string
+		authUsername   string
+		authPassword   string
+		userAddr       string
+		expectedAuth   bool
+	}{
+		{
+			name:           "valid credentials with group ID",
+			configUsername: "testuser",
+			configPassword: "testpass",
+			authUsername:   "testuser@production",
+			authPassword:   "testpass",
+			userAddr:       "127.0.0.1:12345",
+			expectedAuth:   true,
+		},
+		{
+			name:           "valid credentials without group ID",
+			configUsername: "testuser",
+			configPassword: "testpass",
+			authUsername:   "testuser",
+			authPassword:   "testpass",
+			userAddr:       "127.0.0.1:12345",
+			expectedAuth:   true,
+		},
+		{
+			name:           "invalid username with group ID",
+			configUsername: "testuser",
+			configPassword: "testpass",
+			authUsername:   "wronguser@production",
+			authPassword:   "testpass",
+			userAddr:       "127.0.0.1:12345",
+			expectedAuth:   false,
+		},
+		{
+			name:           "invalid password with group ID",
+			configUsername: "testuser",
+			configPassword: "testpass",
+			authUsername:   "testuser@production",
+			authPassword:   "wrongpass",
+			userAddr:       "127.0.0.1:12345",
+			expectedAuth:   false,
+		},
+		{
+			name:           "valid username with multiple @ symbols",
+			configUsername: "testuser",
+			configPassword: "testpass",
+			authUsername:   "testuser@prod@env",
+			authPassword:   "testpass",
+			userAddr:       "127.0.0.1:12345",
+			expectedAuth:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			credStore := &GroupBasedCredentialStore{
+				ConfigUsername: tt.configUsername,
+				ConfigPassword: tt.configPassword,
+			}
+
+			result := credStore.Valid(tt.authUsername, tt.authPassword, tt.userAddr)
+			assert.Equal(t, tt.expectedAuth, result)
+		})
+	}
+}
