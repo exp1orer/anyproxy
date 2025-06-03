@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 
@@ -12,17 +13,20 @@ import (
 type WebSocketWriter struct {
 	conn    *websocket.Conn
 	writeCh chan interface{}
-	stopCh  chan struct{}
+	ctx     context.Context
+	cancel  context.CancelFunc
 	once    sync.Once
 	wg      sync.WaitGroup
 }
 
 // NewWebSocketWriter creates a new WebSocket writer
 func NewWebSocketWriter(conn *websocket.Conn, writeCh chan interface{}) *WebSocketWriter {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &WebSocketWriter{
 		conn:    conn,
 		writeCh: writeCh,
-		stopCh:  make(chan struct{}),
+		ctx:     ctx,
+		cancel:  cancel,
 	}
 }
 
@@ -35,7 +39,7 @@ func (w *WebSocketWriter) Start() {
 // Stop stops the writer and waits for completion
 func (w *WebSocketWriter) Stop() {
 	w.once.Do(func() {
-		close(w.stopCh)
+		w.cancel()
 		// wait for writeLoop to finish, and all messages to be written to conn
 		w.wg.Wait()
 		w.conn.Close()
@@ -44,18 +48,18 @@ func (w *WebSocketWriter) Stop() {
 
 // WriteJSON queues a JSON message for writing
 func (w *WebSocketWriter) WriteJSON(v interface{}) error {
-	// First check if already stopped
+	// Check if context is cancelled
 	select {
-	case <-w.stopCh:
+	case <-w.ctx.Done():
 		return websocket.ErrCloseSent
 	default:
 	}
 
-	// Then try to write or handle stop signal
+	// Try to write or handle cancellation
 	select {
 	case w.writeCh <- v:
 		return nil
-	case <-w.stopCh:
+	case <-w.ctx.Done():
 		return websocket.ErrCloseSent
 	default:
 		slog.Error("WebSocket write channel full, dropping message")
@@ -69,7 +73,7 @@ func (w *WebSocketWriter) writeLoop() {
 
 	for {
 		select {
-		case <-w.stopCh:
+		case <-w.ctx.Done():
 			// Drain remaining messages to preserve order
 			w.drainMessages()
 			return
@@ -77,7 +81,8 @@ func (w *WebSocketWriter) writeLoop() {
 		case msg := <-w.writeCh:
 			if err := w.conn.WriteJSON(msg); err != nil {
 				slog.Error("WebSocket write error", "error", err)
-				go w.Stop() // Auto-stop on write errors
+				// Don't call Stop() here to avoid potential deadlock
+				// Just return and let the caller handle the error through normal error handling
 				return
 			}
 		}

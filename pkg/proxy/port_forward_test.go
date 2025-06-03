@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"net"
 	"testing"
 
@@ -110,12 +111,16 @@ func TestClientPortCleanup(t *testing.T) {
 	defer listener.Close()
 
 	// Create a properly initialized PortListener
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	defer cancel1()
+
 	pm.clientPorts[clientID][9997] = &PortListener{
 		Port:     9997,
 		ClientID: clientID,
 		Protocol: "tcp",
 		Listener: listener,
-		StopCh:   make(chan struct{}),
+		ctx:      ctx1,
+		cancel:   cancel1,
 	}
 
 	// Test cleanup
@@ -160,19 +165,26 @@ func TestGetClientPorts(t *testing.T) {
 	}
 	defer packetConn.Close()
 
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	ctx3, cancel3 := context.WithCancel(context.Background())
+	defer cancel3()
+
 	pm.clientPorts[clientID][9001] = &PortListener{
 		Port:     9001,
 		ClientID: clientID,
 		Protocol: "tcp",
 		Listener: listener1,
-		StopCh:   make(chan struct{}),
+		ctx:      ctx2,
+		cancel:   cancel2,
 	}
 	pm.clientPorts[clientID][9002] = &PortListener{
 		Port:       9002,
 		ClientID:   clientID,
 		Protocol:   "udp",
 		PacketConn: packetConn,
-		StopCh:     make(chan struct{}),
+		ctx:        ctx3,
+		cancel:     cancel3,
 	}
 
 	// Test getting ports
@@ -205,12 +217,16 @@ func TestPortForwardManagerStop(t *testing.T) {
 	}
 	defer listener.Close()
 
+	ctx4, cancel4 := context.WithCancel(context.Background())
+	defer cancel4()
+
 	pm.clientPorts[clientID][9000] = &PortListener{
 		Port:     9000,
 		ClientID: clientID,
 		Protocol: "tcp",
 		Listener: listener,
-		StopCh:   make(chan struct{}),
+		ctx:      ctx4,
+		cancel:   cancel4,
 	}
 	pm.portOwners[9000] = clientID
 

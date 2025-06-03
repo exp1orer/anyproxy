@@ -21,14 +21,14 @@ func TestSOCKS5GroupRouting(t *testing.T) {
 		expected string
 	}{
 		{
-			name:     "Production Group",
-			username: "user@production",
+			name:     "production group",
+			username: "user.production",
 			password: "proxy_pass",
 			expected: "Should route to production group clients",
 		},
 		{
-			name:     "Testing Group",
-			username: "user@testing",
+			name:     "testing group",
+			username: "user.testing",
 			password: "proxy_pass",
 			expected: "Should route to testing group clients",
 		},
@@ -118,8 +118,8 @@ func TestRawSOCKS5(t *testing.T) {
 		username string
 		password string
 	}{
-		{"user@production", "proxy_pass"},
-		{"user@testing", "proxy_pass"},
+		{"user.production", "proxy_pass"},
+		{"user.testing", "proxy_pass"},
 		{"user", "proxy_pass"},
 	}
 

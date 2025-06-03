@@ -50,13 +50,29 @@ func TestNewHTTPProxy(t *testing.T) {
 		t.Error("Config not set correctly")
 	}
 
-	if httpProxy.dialFunc == nil {
-		t.Error("Dial function not set")
-	}
-
 	if httpProxy.listenAddr != cfg.ListenAddr {
 		t.Errorf("Listen address not set correctly, got %s, want %s", httpProxy.listenAddr, cfg.ListenAddr)
 	}
+}
+
+func TestNewHTTPProxy_NilValidation(t *testing.T) {
+	cfg := &config.HTTPConfig{
+		ListenAddr:   "127.0.0.1:8080",
+		AuthUsername: "testuser",
+		AuthPassword: "testpass",
+	}
+
+	// Test with nil config
+	_, err := NewHTTPProxy(nil, func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return nil, nil
+	})
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "config cannot be nil")
+
+	// Test with nil dialFunc
+	_, err = NewHTTPProxy(cfg, nil)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "dialFunc cannot be nil")
 }
 
 func TestHTTPProxyStartStop(t *testing.T) {
@@ -481,10 +497,10 @@ func TestHTTPProxy_AuthenticateWithGroupID(t *testing.T) {
 			name:           "valid credentials with group ID",
 			configUsername: "testuser",
 			configPassword: "testpass",
-			authUsername:   "testuser@production",
+			authUsername:   "testuser.production",
 			authPassword:   "testpass",
 			expectedAuth:   true,
-			expectedUser:   "testuser@production",
+			expectedUser:   "testuser.production",
 		},
 		{
 			name:           "valid credentials without group ID",
@@ -499,28 +515,28 @@ func TestHTTPProxy_AuthenticateWithGroupID(t *testing.T) {
 			name:           "invalid username with group ID",
 			configUsername: "testuser",
 			configPassword: "testpass",
-			authUsername:   "wronguser@production",
+			authUsername:   "wronguser.production",
 			authPassword:   "testpass",
 			expectedAuth:   false,
-			expectedUser:   "wronguser@production",
+			expectedUser:   "wronguser.production",
 		},
 		{
 			name:           "invalid password with group ID",
 			configUsername: "testuser",
 			configPassword: "testpass",
-			authUsername:   "testuser@production",
+			authUsername:   "testuser.production",
 			authPassword:   "wrongpass",
 			expectedAuth:   false,
-			expectedUser:   "testuser@production",
+			expectedUser:   "testuser.production",
 		},
 		{
-			name:           "valid username with multiple @ symbols",
+			name:           "valid username with multiple group levels",
 			configUsername: "testuser",
 			configPassword: "testpass",
-			authUsername:   "testuser@prod@env",
+			authUsername:   "testuser.prod.env",
 			authPassword:   "testpass",
 			expectedAuth:   true,
-			expectedUser:   "testuser@prod@env",
+			expectedUser:   "testuser.prod.env",
 		},
 	}
 

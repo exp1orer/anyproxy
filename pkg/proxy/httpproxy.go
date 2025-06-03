@@ -34,6 +34,13 @@ func NewHTTPProxy(cfg *config.HTTPConfig, dialFunc Dialer) (GatewayProxy, error)
 
 // NewHTTPProxyWithAuth creates a new HTTP/HTTPS proxy with authentication support
 func NewHTTPProxyWithAuth(cfg *config.HTTPConfig, dialFunc Dialer, groupExtractor GroupExtractor) (GatewayProxy, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("config cannot be nil")
+	}
+	if dialFunc == nil {
+		return nil, fmt.Errorf("dialFunc cannot be nil")
+	}
+
 	proxy := &httpProxy{
 		config:         cfg,
 		dialFunc:       dialFunc,
@@ -96,9 +103,6 @@ func (h *httpProxy) Stop() error {
 
 // DialConn implements the GatewayProxy interface by using the dialFunc
 func (h *httpProxy) DialConn(network, addr string) (net.Conn, error) {
-	if h.dialFunc == nil {
-		return nil, fmt.Errorf("no dial function provided")
-	}
 	return h.dialFunc(context.Background(), network, addr)
 }
 

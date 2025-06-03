@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
@@ -23,7 +24,7 @@ import (
 )
 
 const (
-	writeBufSize = 4096
+	writeBufSize = 1000
 )
 
 // Client represents the proxy client
@@ -36,17 +37,20 @@ type Client struct {
 	conns      map[string]net.Conn
 	msgChans   map[string]chan map[string]interface{} // Message channels per connection
 	msgChansMu sync.RWMutex
-	stopCh     chan struct{}
+	ctx        context.Context
+	cancel     context.CancelFunc
 	wg         sync.WaitGroup
 }
 
 // NewClient creates a new proxy client
 func NewClient(cfg *config.ClientConfig) (*Client, error) {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Client{
 		config:   cfg,
 		conns:    make(map[string]net.Conn),
 		msgChans: make(map[string]chan map[string]interface{}),
-		stopCh:   make(chan struct{}),
+		ctx:      ctx,
+		cancel:   cancel,
 		writeBuf: make(chan interface{}, writeBufSize),
 	}, nil
 }
@@ -68,29 +72,29 @@ func (c *Client) Stop() error {
 	slog.Info("Stopping client gracefully...")
 
 	// Step 1: Signal all goroutines to stop accepting new work
-	close(c.stopCh)
+	c.cancel()
 
 	// Step 2: Give existing connections time to finish current operations
 	slog.Info("Waiting for active connections to finish...")
-	time.Sleep(500 * time.Millisecond)
-
-	// Step 3: Close WebSocket connection to stop receiving new requests
-	if c.wsConn != nil {
-		c.wsConn.Close()
+	gracefulWait := func(duration time.Duration) bool {
+		select {
+		case <-c.ctx.Done():
+			return false // Already cancelled
+		case <-time.After(duration):
+			return true // Wait completed
+		}
 	}
+	gracefulWait(500 * time.Millisecond)
 
-	// Step 4: Give a bit more time for pending writes to complete
-	time.Sleep(200 * time.Millisecond)
-
-	// Step 5: Stop WebSocket writer
+	// Step 3: Stop WebSocket writer - this will close the WebSocket connection
 	if c.writer != nil {
 		c.writer.Stop()
 	}
 
-	// Step 6: Close all remaining connections
+	// Step 4: Close all remaining connections
 	c.closeAllConnections()
 
-	// Step 7: Wait for all goroutines to finish with timeout
+	// Step 5: Wait for all goroutines to finish with timeout
 	done := make(chan struct{})
 	go func() {
 		c.wg.Wait()
@@ -107,14 +111,14 @@ func (c *Client) Stop() error {
 	return nil
 }
 
-// connectionLoop handles connection and reconnection logic
+// connectionLoop handles connection and reconnection logic with context-aware backoff
 func (c *Client) connectionLoop() {
 	backoff := 1 * time.Second
 	maxBackoff := 60 * time.Second
 
 	for {
 		select {
-		case <-c.stopCh:
+		case <-c.ctx.Done():
 			return
 		default:
 		}
@@ -123,9 +127,9 @@ func (c *Client) connectionLoop() {
 		if err := c.connect(); err != nil {
 			slog.Error("Failed to connect to gateway", "error", err, "retrying_in", backoff)
 
-			// Wait before retry
+			// Context-aware wait before retry
 			select {
-			case <-c.stopCh:
+			case <-c.ctx.Done():
 				return
 			case <-time.After(backoff):
 			}
@@ -142,8 +146,15 @@ func (c *Client) connectionLoop() {
 		backoff = 1 * time.Second
 		slog.Info("Successfully connected to gateway")
 
-		// Handle messages until connection fails
+		// Handle messages until connection fails or context is cancelled
 		c.handleMessages()
+
+		// Check if we're stopping
+		select {
+		case <-c.ctx.Done():
+			return
+		default:
+		}
 
 		// Connection lost, cleanup and retry
 		slog.Info("Connection to gateway lost, cleaning up and retrying...")
@@ -153,19 +164,31 @@ func (c *Client) connectionLoop() {
 
 // cleanup cleans up resources after connection loss
 func (c *Client) cleanup() {
-	// Stop writer
-	c.writer.Stop()
-	close(c.writeBuf)
+	// Stop writer first - this will close the WebSocket connection
+	// and stop using writeBuf
+	if c.writer != nil {
+		c.writer.Stop()
+		c.writer = nil
+	}
 
-	// Close WebSocket connection
-	c.wsConn.Close()
+	// Clear the connection reference (already closed by writer)
 	c.wsConn = nil
 
 	// Close all connections
 	c.closeAllConnections()
 
-	// Recreate write buffer for next connection
-	c.writeBuf = make(chan interface{}, writeBufSize)
+	// Close write buffer and recreate for next connection (only if not stopping)
+	if c.writeBuf != nil {
+		close(c.writeBuf)
+		c.writeBuf = nil
+	}
+
+	select {
+	case <-c.ctx.Done():
+		// Don't recreate if we're stopping
+	default:
+		c.writeBuf = make(chan interface{}, writeBufSize)
+	}
 }
 
 // closeAllConnections closes all active connections
@@ -205,7 +228,7 @@ func (c *Client) connect() error {
 	)
 	headers.Set("Authorization", "Basic "+auth)
 
-	// Create WebSocket dialer
+	// Create WebSocket dialer with context
 	dialer := websocket.Dialer{
 		TLSClientConfig:  tlsConfig,
 		Proxy:            http.ProxyFromEnvironment,
@@ -259,19 +282,28 @@ func (c *Client) createTLSConfig() (*tls.Config, error) {
 	return tlsConfig, nil
 }
 
-// handleMessages processes incoming messages from the gateway
+// handleMessages processes incoming messages from the gateway with context awareness
 func (c *Client) handleMessages() {
 	for {
 		select {
-		case <-c.stopCh:
+		case <-c.ctx.Done():
 			return
 		default:
 		}
 
-		// Read message from gateway
+		// Read message from gateway without artificial timeout
+		// Let WebSocket handle its own timeout/keepalive mechanisms
 		var msg map[string]interface{}
-		if err := c.wsConn.ReadJSON(&msg); err != nil {
-			slog.Error("WebSocket read error", "error", err)
+		err := c.wsConn.ReadJSON(&msg)
+		if err != nil {
+			// Check for WebSocket close errors
+			if websocket.IsCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseNormalClosure) {
+				slog.Info("WebSocket connection closed", "error", err)
+			} else {
+				slog.Error("WebSocket read error", "error", err)
+			}
+
+			// Connection failed, exit to trigger reconnection
 			return
 		}
 
@@ -319,9 +351,11 @@ func (c *Client) routeMessage(msg map[string]interface{}) {
 		return
 	}
 
-	// Send message to connection's channel (non-blocking)
+	// Send message to connection's channel (non-blocking with context awareness)
 	select {
 	case msgChan <- msg:
+	case <-c.ctx.Done():
+		return
 	default:
 		slog.Warn("Message channel full for connection, dropping message", "conn_id", connID)
 	}
@@ -347,7 +381,7 @@ func (c *Client) createMessageChannel(connID string) {
 func (c *Client) processConnectionMessages(connID string, msgChan chan map[string]interface{}) {
 	for {
 		select {
-		case <-c.stopCh:
+		case <-c.ctx.Done():
 			return
 		case msg, ok := <-msgChan:
 			if !ok {
@@ -398,8 +432,12 @@ func (c *Client) handleConnectMessage(msg map[string]interface{}) {
 		return
 	}
 
-	// Establish connection to the target
-	conn, err := net.DialTimeout(network, address, 30*time.Second)
+	// Establish connection to the target with context
+	var d net.Dialer
+	ctx, cancel := context.WithTimeout(c.ctx, 30*time.Second)
+	defer cancel()
+
+	conn, err := d.DialContext(ctx, network, address)
 	if err != nil {
 		slog.Error("Failed to connect", "address", address, "error", err)
 		c.sendConnectResponse(connID, false, err.Error())
@@ -443,7 +481,7 @@ func (c *Client) sendConnectResponse(connID string, success bool, errorMsg strin
 	return c.writer.WriteJSON(response)
 }
 
-// handleConnection reads from the target connection and sends data to gateway
+// handleConnection reads from the target connection and sends data to gateway with context awareness
 func (c *Client) handleConnection(connID string) {
 	slog.Debug("Starting to handle connection", "conn_id", connID)
 
@@ -461,14 +499,18 @@ func (c *Client) handleConnection(connID string) {
 
 	for {
 		select {
-		case <-c.stopCh:
+		case <-c.ctx.Done():
 			slog.Debug("Client stopping, exiting connection handler", "conn_id", connID)
 			return
 		default:
 		}
 
-		// Set reasonable read timeout for shutdown response
-		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		// Set read deadline based on context - use longer timeout for proxy connections
+		deadline := time.Now().Add(30 * time.Second) // Increased from 5s to 30s for better proxy performance
+		if ctxDeadline, ok := c.ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+			deadline = ctxDeadline
+		}
+		conn.SetReadDeadline(deadline)
 
 		n, err := conn.Read(buffer)
 		if n > 0 {
@@ -489,7 +531,13 @@ func (c *Client) handleConnection(connID string) {
 
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				continue // Continue on timeout without logging
+				// Check if timeout is due to context cancellation
+				select {
+				case <-c.ctx.Done():
+					return
+				default:
+					continue // Continue on timeout if context is still valid
+				}
 			}
 
 			if err != io.EOF {
@@ -575,7 +623,13 @@ func (c *Client) handleDataMessage(msg map[string]interface{}) {
 		return
 	}
 
-	// Write data to the connection
+	// Write data to the connection with context awareness - use longer timeout for proxy connections
+	deadline := time.Now().Add(30 * time.Second) // Increased from 5s to 30s for better proxy performance
+	if ctxDeadline, ok := c.ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
+	conn.SetWriteDeadline(deadline)
+
 	_, err = conn.Write(data)
 	if err != nil {
 		slog.Error("Failed to write data to connection", "conn_id", connID, "error", err)

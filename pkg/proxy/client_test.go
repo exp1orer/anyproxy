@@ -56,7 +56,7 @@ func TestNewClient(t *testing.T) {
 			assert.Equal(t, tt.config, client.config)
 			assert.NotNil(t, client.conns)
 			assert.NotNil(t, client.msgChans)
-			assert.NotNil(t, client.stopCh)
+			assert.NotNil(t, client.ctx)
 			assert.NotNil(t, client.writeBuf)
 			assert.Equal(t, writeBufSize, cap(client.writeBuf))
 		})
@@ -536,6 +536,6 @@ func TestProxyClient_CreateMessageChannel(t *testing.T) {
 	assert.Equal(t, 100, cap(msgChan))
 
 	// Cleanup
-	close(client.stopCh)
+	client.cancel()
 	time.Sleep(10 * time.Millisecond) // Give goroutine time to exit
 }

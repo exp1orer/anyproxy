@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sync"
@@ -230,24 +231,32 @@ func TestGateway_GetRandomClient(t *testing.T) {
 }
 
 func TestClientConn_Basic(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	client := &ClientConn{
 		ID:       "test-client",
 		Conns:    make(map[string]*Conn),
 		msgChans: make(map[string]chan map[string]interface{}),
-		stopCh:   make(chan struct{}),
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 
 	assert.Equal(t, "test-client", client.ID)
 	assert.NotNil(t, client.Conns)
 	assert.NotNil(t, client.msgChans)
-	assert.NotNil(t, client.stopCh)
+	assert.NotNil(t, client.ctx)
 }
 
 func TestClientConn_RouteMessage(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	client := &ClientConn{
 		ID:       "test-client",
 		msgChans: make(map[string]chan map[string]interface{}),
-		stopCh:   make(chan struct{}),
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 
 	tests := []struct {
@@ -292,10 +301,14 @@ func TestClientConn_RouteMessage(t *testing.T) {
 }
 
 func TestClientConn_CreateMessageChannel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	client := &ClientConn{
 		ID:       "test-client",
 		msgChans: make(map[string]chan map[string]interface{}),
-		stopCh:   make(chan struct{}),
+		ctx:      ctx,
+		cancel:   cancel,
 	}
 
 	connID := "test-conn"
@@ -317,7 +330,7 @@ func TestClientConn_CreateMessageChannel(t *testing.T) {
 	client.msgChansMu.RUnlock()
 
 	// Cleanup
-	close(client.stopCh)
+	cancel()
 	time.Sleep(10 * time.Millisecond) // Give goroutine time to exit
 }
 
@@ -358,12 +371,17 @@ func TestClientConn_CloseConnection(t *testing.T) {
 }
 
 func TestClientConn_StopBasic(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	client := &ClientConn{
 		ID:       "test-client",
 		writeBuf: make(chan interface{}, 10),
 		Conns:    make(map[string]*Conn),
 		msgChans: make(map[string]chan map[string]interface{}),
-		stopCh:   make(chan struct{}),
+		ctx:      ctx,
+		cancel:   cancel,
+		stopOnce: sync.Once{}, // Initialize stopOnce
 	}
 
 	// Add a mock connection
@@ -377,11 +395,15 @@ func TestClientConn_StopBasic(t *testing.T) {
 	}
 	client.Conns["test-conn"] = proxyConn
 
-	// Test stop - this will panic because Conn and Writer are nil
-	// but we can test that the method exists
-	assert.Panics(t, func() {
+	// Test stop - this should no longer panic with our improved error handling
+	// The new implementation safely handles nil Conn and Writer
+	assert.NotPanics(t, func() {
 		client.Stop()
 	})
+
+	// Verify that connections were properly cleaned up
+	assert.Empty(t, client.Conns, "All connections should be cleaned up")
+	assert.Empty(t, client.msgChans, "All message channels should be cleaned up")
 }
 
 func TestProxyConn_Basic(t *testing.T) {

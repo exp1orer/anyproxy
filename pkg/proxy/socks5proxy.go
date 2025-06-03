@@ -45,6 +45,13 @@ func NewSOCKS5Proxy(cfg *config.SOCKS5Config, dialFunc Dialer) (GatewayProxy, er
 
 // NewSOCKS5ProxyWithAuth creates a new SOCKS5 proxy with authentication support
 func NewSOCKS5ProxyWithAuth(cfg *config.SOCKS5Config, dialFunc Dialer, groupExtractor GroupExtractor) (GatewayProxy, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("config cannot be nil")
+	}
+	if dialFunc == nil {
+		return nil, fmt.Errorf("dialFunc cannot be nil")
+	}
+
 	socks5Auths := []socks5.Authenticator{}
 
 	if cfg.AuthUsername != "" && cfg.AuthPassword != "" {
@@ -137,9 +144,6 @@ func (s *socks5Proxy) Stop() error {
 
 // DialConn implements the GatewayProxy interface by using the dialFunc
 func (s *socks5Proxy) DialConn(network, addr string) (net.Conn, error) {
-	if s.dialFunc == nil {
-		return nil, fmt.Errorf("no dial function provided")
-	}
 	return s.dialFunc(context.Background(), network, addr)
 }
 
