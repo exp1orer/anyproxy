@@ -53,20 +53,35 @@ type PortListener struct {
 
 // NewPortForwardManager creates a new port forwarding manager
 func NewPortForwardManager() *PortForwardManager {
+	slog.Info("Creating new port forwarding manager")
+
 	ctx, cancel := context.WithCancel(context.Background())
-	return &PortForwardManager{
+	manager := &PortForwardManager{
 		clientPorts: make(map[string]map[int]*PortListener),
 		portOwners:  make(map[int]string),
 		ctx:         ctx,
 		cancel:      cancel,
 	}
+
+	slog.Debug("Port forwarding manager initialized successfully",
+		"client_ports_capacity", len(manager.clientPorts),
+		"port_owners_capacity", len(manager.portOwners))
+
+	return manager
 }
 
 // OpenPorts opens the requested ports for a client
 func (pm *PortForwardManager) OpenPorts(client *ClientConn, openPorts []config.OpenPort) error {
+	openStart := time.Now()
+
 	if client == nil {
+		slog.Error("Port opening failed: client cannot be nil")
 		return fmt.Errorf("client cannot be nil")
 	}
+
+	slog.Info("Opening ports for client",
+		"client_id", client.ID,
+		"port_count", len(openPorts))
 
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
@@ -74,6 +89,8 @@ func (pm *PortForwardManager) OpenPorts(client *ClientConn, openPorts []config.O
 	// Check if manager is shutting down
 	select {
 	case <-pm.ctx.Done():
+		slog.Warn("Port opening rejected: manager is shutting down",
+			"client_id", client.ID)
 		return fmt.Errorf("port forward manager is shutting down")
 	default:
 	}
@@ -81,26 +98,62 @@ func (pm *PortForwardManager) OpenPorts(client *ClientConn, openPorts []config.O
 	// Initialize client ports map if it doesn't exist
 	if pm.clientPorts[client.ID] == nil {
 		pm.clientPorts[client.ID] = make(map[int]*PortListener)
+		slog.Debug("Initialized port map for new client", "client_id", client.ID)
 	}
 
 	var errors []error
 	successfulPorts := []*PortListener{}
+	conflictPorts := []int{}
+	duplicatePorts := []int{}
+
+	// Log details of each port request
+	for i, openPort := range openPorts {
+		slog.Debug("Processing port request",
+			"client_id", client.ID,
+			"port_index", i,
+			"remote_port", openPort.RemotePort,
+			"local_host", openPort.LocalHost,
+			"local_port", openPort.LocalPort,
+			"protocol", openPort.Protocol)
+	}
 
 	for _, openPort := range openPorts {
 		// Check if port is already in use
 		if existingClientID, exists := pm.portOwners[openPort.RemotePort]; exists {
 			if existingClientID != client.ID {
+				conflictPorts = append(conflictPorts, openPort.RemotePort)
+				slog.Warn("Port conflict detected",
+					"client_id", client.ID,
+					"port", openPort.RemotePort,
+					"existing_owner", existingClientID)
 				errors = append(errors, fmt.Errorf("port %d already in use by client %s", openPort.RemotePort, existingClientID))
 				continue
 			}
 			// Same client requesting same port - skip
-			slog.Info("Port already opened by same client", "port", openPort.RemotePort, "client_id", client.ID)
+			duplicatePorts = append(duplicatePorts, openPort.RemotePort)
+			slog.Info("Port already opened by same client",
+				"port", openPort.RemotePort,
+				"client_id", client.ID)
 			continue
 		}
 
 		// Create port listener
+		slog.Debug("Creating port listener",
+			"client_id", client.ID,
+			"port", openPort.RemotePort,
+			"protocol", openPort.Protocol)
+
+		createStart := time.Now()
 		portListener, err := pm.createPortListener(client, openPort)
+		createDuration := time.Since(createStart)
+
 		if err != nil {
+			slog.Error("Failed to create port listener",
+				"client_id", client.ID,
+				"port", openPort.RemotePort,
+				"protocol", openPort.Protocol,
+				"create_duration", createDuration,
+				"error", err)
 			errors = append(errors, fmt.Errorf("failed to open port %d: %v", openPort.RemotePort, err))
 			continue
 		}
@@ -110,16 +163,26 @@ func (pm *PortForwardManager) OpenPorts(client *ClientConn, openPorts []config.O
 		pm.portOwners[openPort.RemotePort] = client.ID
 		successfulPorts = append(successfulPorts, portListener)
 
-		slog.Info("Port forwarding opened",
+		slog.Info("Port forwarding created successfully",
 			"client_id", client.ID,
 			"remote_port", openPort.RemotePort,
 			"local_host", openPort.LocalHost,
 			"local_port", openPort.LocalPort,
-			"protocol", openPort.Protocol)
+			"protocol", openPort.Protocol,
+			"create_duration", createDuration)
 	}
 
 	// Start listening on successful ports
-	for _, portListener := range successfulPorts {
+	slog.Debug("Starting listeners for successful ports",
+		"client_id", client.ID,
+		"successful_count", len(successfulPorts))
+
+	for i, portListener := range successfulPorts {
+		slog.Debug("Starting port listener",
+			"client_id", client.ID,
+			"port", portListener.Port,
+			"listener_index", i)
+
 		pm.wg.Add(1)
 		go func(pl *PortListener) {
 			defer pm.wg.Done()
@@ -127,18 +190,46 @@ func (pm *PortForwardManager) OpenPorts(client *ClientConn, openPorts []config.O
 		}(portListener)
 	}
 
+	elapsed := time.Since(openStart)
+
 	// If we have any errors, return them
 	if len(errors) > 0 {
+		slog.Error("Port opening completed with errors",
+			"client_id", client.ID,
+			"requested_ports", len(openPorts),
+			"successful_ports", len(successfulPorts),
+			"error_count", len(errors),
+			"conflict_ports", conflictPorts,
+			"duplicate_ports", duplicatePorts,
+			"duration", elapsed)
 		return fmt.Errorf("failed to open some ports: %v", errors)
 	}
+
+	slog.Info("All ports opened successfully",
+		"client_id", client.ID,
+		"successful_ports", len(successfulPorts),
+		"duplicate_ports", len(duplicatePorts),
+		"total_requested", len(openPorts),
+		"duration", elapsed)
 
 	return nil
 }
 
 // createPortListener creates a new port listener
 func (pm *PortForwardManager) createPortListener(client *ClientConn, openPort config.OpenPort) (*PortListener, error) {
+	slog.Debug("Creating port listener",
+		"client_id", client.ID,
+		"port", openPort.RemotePort,
+		"protocol", openPort.Protocol,
+		"local_target", fmt.Sprintf("%s:%d", openPort.LocalHost, openPort.LocalPort))
+
 	// Support both TCP and UDP
 	if openPort.Protocol != "tcp" && openPort.Protocol != "udp" {
+		slog.Error("Unsupported protocol for port forwarding",
+			"client_id", client.ID,
+			"port", openPort.RemotePort,
+			"protocol", openPort.Protocol,
+			"supported_protocols", []string{"tcp", "udp"})
 		return nil, fmt.Errorf("protocol %s not supported, only TCP and UDP are supported", openPort.Protocol)
 	}
 
@@ -155,23 +246,74 @@ func (pm *PortForwardManager) createPortListener(client *ClientConn, openPort co
 		cancel:    cancel,
 	}
 
+	slog.Debug("Port listener structure created",
+		"client_id", client.ID,
+		"port", openPort.RemotePort,
+		"bind_addr", addr)
+
 	if openPort.Protocol == "tcp" {
 		// Create TCP listener
+		slog.Debug("Creating TCP listener",
+			"client_id", client.ID,
+			"port", openPort.RemotePort,
+			"bind_addr", addr)
+
+		listenStart := time.Now()
 		listener, err := net.Listen("tcp", addr)
+		listenDuration := time.Since(listenStart)
+
 		if err != nil {
+			slog.Error("Failed to create TCP listener",
+				"client_id", client.ID,
+				"port", openPort.RemotePort,
+				"bind_addr", addr,
+				"listen_duration", listenDuration,
+				"error", err)
 			cancel()
 			return nil, fmt.Errorf("failed to listen on TCP port %d: %v", openPort.RemotePort, err)
 		}
 		portListener.Listener = listener
+
+		slog.Debug("TCP listener created successfully",
+			"client_id", client.ID,
+			"port", openPort.RemotePort,
+			"listen_duration", listenDuration,
+			"local_addr", listener.Addr())
 	} else { // UDP
 		// Create UDP listener
+		slog.Debug("Creating UDP packet connection",
+			"client_id", client.ID,
+			"port", openPort.RemotePort,
+			"bind_addr", addr)
+
+		listenStart := time.Now()
 		packetConn, err := net.ListenPacket("udp", addr)
+		listenDuration := time.Since(listenStart)
+
 		if err != nil {
+			slog.Error("Failed to create UDP packet connection",
+				"client_id", client.ID,
+				"port", openPort.RemotePort,
+				"bind_addr", addr,
+				"listen_duration", listenDuration,
+				"error", err)
 			cancel()
 			return nil, fmt.Errorf("failed to listen on UDP port %d: %v", openPort.RemotePort, err)
 		}
 		portListener.PacketConn = packetConn
+
+		slog.Debug("UDP packet connection created successfully",
+			"client_id", client.ID,
+			"port", openPort.RemotePort,
+			"listen_duration", listenDuration,
+			"local_addr", packetConn.LocalAddr())
 	}
+
+	slog.Debug("Port listener created successfully",
+		"client_id", client.ID,
+		"port", openPort.RemotePort,
+		"protocol", openPort.Protocol,
+		"local_target", fmt.Sprintf("%s:%d", openPort.LocalHost, openPort.LocalPort))
 
 	return portListener, nil
 }
@@ -583,6 +725,7 @@ func (pm *PortForwardManager) GetClientPorts(clientID string) []int {
 
 	clientPortMap, exists := pm.clientPorts[clientID]
 	if !exists {
+		slog.Debug("No ports found for client", "client_id", clientID)
 		return nil
 	}
 
@@ -590,5 +733,11 @@ func (pm *PortForwardManager) GetClientPorts(clientID string) []int {
 	for port := range clientPortMap {
 		ports = append(ports, port)
 	}
+
+	slog.Debug("Retrieved client ports",
+		"client_id", clientID,
+		"port_count", len(ports),
+		"ports", ports)
+
 	return ports
 }
