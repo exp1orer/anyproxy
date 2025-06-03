@@ -22,23 +22,25 @@ import (
 
 // Gateway represents the proxy gateway server
 type Gateway struct {
-	config     *config.GatewayConfig
-	httpServer *http.Server
-	proxies    []GatewayProxy // Support multiple proxies
-	upgrader   websocket.Upgrader
-	clientsMu  sync.RWMutex
-	clients    map[string]*ClientConn
-	groups     map[string]map[string]struct{}
-	stopCh     chan struct{}
-	wg         sync.WaitGroup
+	config         *config.GatewayConfig
+	httpServer     *http.Server
+	proxies        []GatewayProxy // Support multiple proxies
+	upgrader       websocket.Upgrader
+	clientsMu      sync.RWMutex
+	clients        map[string]*ClientConn
+	groups         map[string]map[string]struct{}
+	portForwardMgr *PortForwardManager
+	stopCh         chan struct{}
+	wg             sync.WaitGroup
 }
 
 // NewGateway creates a new proxy gateway
 func NewGateway(cfg *config.Config) (*Gateway, error) {
 	gateway := &Gateway{
-		config:  &cfg.Gateway,
-		clients: make(map[string]*ClientConn),
-		groups:  make(map[string]map[string]struct{}),
+		config:         &cfg.Gateway,
+		clients:        make(map[string]*ClientConn),
+		groups:         make(map[string]map[string]struct{}),
+		portForwardMgr: NewPortForwardManager(),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true
@@ -54,12 +56,14 @@ func NewGateway(cfg *config.Config) (*Gateway, error) {
 		// Extract user context from context if available
 		var groupID string
 		if userCtx, ok := ctx.Value("user").(*UserContext); ok {
+			slog.Info("dialFn get userCtx", "userCtx", userCtx)
 			groupID = userCtx.GroupID
 		}
 
 		// Get a client from the specified group
 		client, err := gateway.getClientByGroup(groupID)
 		if err != nil {
+			slog.Error("Failed to get client by group", "group_id", groupID, "error", err)
 			return nil, err
 		}
 		return client.dialNetwork(network, addr)
@@ -99,13 +103,27 @@ func NewGateway(cfg *config.Config) (*Gateway, error) {
 }
 
 // extractGroupFromUsername extracts group ID from username
-// Expected format: username@group-id or just username (uses default group)
+// Expected format: username.group-id or just username (uses default group)
 func (g *Gateway) extractGroupFromUsername(username string) string {
-	parts := strings.Split(username, "@")
-	if len(parts) == 2 {
-		return parts[1] // Return group-id part
+	slog.Info("extractGroupFromUsername", "username", username)
+	// Use dot as delimiter to support UUID group-ids that may contain hyphens
+	parts := strings.Split(username, ".")
+	if len(parts) >= 2 {
+		// Join all parts after the first one as group-id (in case group-id contains dots)
+		return strings.Join(parts[1:], ".")
 	}
 	return "" // Default group
+}
+
+// extractBaseUsername extracts the base username (without group-id) from a group-enabled username
+// Expected format: username.group-id or just username
+// Returns: base username for authentication
+func extractBaseUsername(username string) string {
+	parts := strings.Split(username, ".")
+	if len(parts) >= 1 {
+		return parts[0] // Return base username part
+	}
+	return username // Fallback to original username
 }
 
 // Start starts the gateway
@@ -188,18 +206,21 @@ func (g *Gateway) Stop() error {
 		}
 	}
 
-	// Step 4: Give clients time to finish processing
+	// Step 4: Stop port forwarding manager
+	g.portForwardMgr.Stop()
+
+	// Step 5: Give clients time to finish processing
 	slog.Info("Waiting for clients to finish processing...")
 	time.Sleep(500 * time.Millisecond)
 
-	// Step 5: Stop all client connections gracefully
+	// Step 6: Stop all client connections gracefully
 	g.clientsMu.RLock()
 	for _, client := range g.clients {
 		client.Stop()
 	}
 	g.clientsMu.RUnlock()
 
-	// Step 6: Wait for all goroutines to finish
+	// Step 7: Wait for all goroutines to finish
 	done := make(chan struct{})
 	go func() {
 		g.wg.Wait()
@@ -248,14 +269,15 @@ func (g *Gateway) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Create and register client
 	client := &ClientConn{
-		ID:       clientID,
-		GroupID:  groupID,
-		Conn:     conn,
-		Writer:   writer,
-		writeBuf: writeBuf,
-		Conns:    make(map[string]*Conn),
-		msgChans: make(map[string]chan map[string]interface{}),
-		stopCh:   make(chan struct{}),
+		ID:             clientID,
+		GroupID:        groupID,
+		Conn:           conn,
+		Writer:         writer,
+		writeBuf:       writeBuf,
+		Conns:          make(map[string]*Conn),
+		msgChans:       make(map[string]chan map[string]interface{}),
+		stopCh:         make(chan struct{}),
+		portForwardMgr: g.portForwardMgr,
 	}
 
 	g.addClient(client)
@@ -297,6 +319,9 @@ func (g *Gateway) removeClient(clientID string) {
 			break
 		}
 	}
+
+	// Close all port forwarding for this client
+	g.portForwardMgr.CloseClientPorts(clientID)
 
 	delete(g.clients, clientID)
 }
@@ -341,18 +366,19 @@ func (g *Gateway) getClientByGroup(groupID string) (*ClientConn, error) {
 
 // ClientConn represents a connected proxy client
 type ClientConn struct {
-	ID         string
-	GroupID    string
-	Conn       *websocket.Conn
-	Writer     *WebSocketWriter
-	writeBuf   chan interface{}
-	ConnsMu    sync.RWMutex
-	Conns      map[string]*Conn
-	msgChans   map[string]chan map[string]interface{} // Message channels per connection
-	msgChansMu sync.RWMutex
-	stopOnce   sync.Once
-	stopCh     chan struct{}
-	wg         sync.WaitGroup
+	ID             string
+	GroupID        string
+	Conn           *websocket.Conn
+	Writer         *WebSocketWriter
+	writeBuf       chan interface{}
+	ConnsMu        sync.RWMutex
+	Conns          map[string]*Conn
+	msgChans       map[string]chan map[string]interface{} // Message channels per connection
+	msgChansMu     sync.RWMutex
+	stopOnce       sync.Once
+	stopCh         chan struct{}
+	wg             sync.WaitGroup
+	portForwardMgr *PortForwardManager // Reference to port forwarding manager
 }
 
 // Conn represents a proxied connection
@@ -482,6 +508,9 @@ func (c *ClientConn) handleMessage() {
 		case "connect_response", "data", "close":
 			// Route all messages to per-connection channels
 			c.routeMessage(msg)
+		case "port_forward_request":
+			// Handle port forwarding request directly
+			c.handlePortForwardRequest(msg)
 		default:
 			slog.Warn("Unknown message type", "type", msgType)
 		}
@@ -806,4 +835,93 @@ func (c *ClientConn) closeConnection(connID string) {
 	})
 
 	slog.Debug("Connection closed and cleaned up", "conn_id", proxyConn.ID, "client_id", c.ID)
+}
+
+// handlePortForwardRequest handles port forwarding requests from clients
+func (c *ClientConn) handlePortForwardRequest(msg map[string]interface{}) {
+	// Extract open ports from the message
+	openPortsInterface, ok := msg["open_ports"]
+	if !ok {
+		slog.Error("No open_ports in port_forward_request", "client_id", c.ID)
+		c.sendPortForwardResponse(false, "Missing open_ports field")
+		return
+	}
+
+	// Convert to []config.OpenPort
+	openPortsSlice, ok := openPortsInterface.([]interface{})
+	if !ok {
+		slog.Error("Invalid open_ports format", "client_id", c.ID)
+		c.sendPortForwardResponse(false, "Invalid open_ports format")
+		return
+	}
+
+	var openPorts []config.OpenPort
+	for _, portInterface := range openPortsSlice {
+		portMap, ok := portInterface.(map[string]interface{})
+		if !ok {
+			slog.Error("Invalid port configuration format", "client_id", c.ID)
+			continue
+		}
+
+		// Extract port configuration
+		remotePort, ok := portMap["remote_port"].(float64) // JSON numbers are float64
+		if !ok {
+			slog.Error("Invalid remote_port", "client_id", c.ID)
+			continue
+		}
+
+		localPort, ok := portMap["local_port"].(float64)
+		if !ok {
+			slog.Error("Invalid local_port", "client_id", c.ID)
+			continue
+		}
+
+		localHost, ok := portMap["local_host"].(string)
+		if !ok {
+			slog.Error("Invalid local_host", "client_id", c.ID)
+			continue
+		}
+
+		protocol, ok := portMap["protocol"].(string)
+		if !ok {
+			protocol = "tcp" // Default to TCP
+		}
+
+		openPorts = append(openPorts, config.OpenPort{
+			RemotePort: int(remotePort),
+			LocalPort:  int(localPort),
+			LocalHost:  localHost,
+			Protocol:   protocol,
+		})
+	}
+
+	if len(openPorts) == 0 {
+		slog.Info("No valid ports to open", "client_id", c.ID)
+		c.sendPortForwardResponse(true, "No ports to open")
+		return
+	}
+
+	// Attempt to open the ports
+	err := c.portForwardMgr.OpenPorts(c, openPorts)
+	if err != nil {
+		slog.Error("Failed to open ports", "client_id", c.ID, "error", err)
+		c.sendPortForwardResponse(false, err.Error())
+		return
+	}
+
+	slog.Info("Successfully opened ports", "client_id", c.ID, "port_count", len(openPorts))
+	c.sendPortForwardResponse(true, "Ports opened successfully")
+}
+
+// sendPortForwardResponse sends a response to a port forwarding request
+func (c *ClientConn) sendPortForwardResponse(success bool, message string) {
+	response := map[string]interface{}{
+		"type":    "port_forward_response",
+		"success": success,
+		"message": message,
+	}
+
+	if err := c.Writer.WriteJSON(response); err != nil {
+		slog.Error("Failed to send port forward response", "client_id", c.ID, "error", err)
+	}
 }

@@ -162,8 +162,9 @@ func TestGatewayNoProxies(t *testing.T) {
 
 func TestGateway_ClientConnManagement(t *testing.T) {
 	gateway := &Gateway{
-		clients: make(map[string]*ClientConn),
-		groups:  make(map[string]map[string]struct{}),
+		clients:        make(map[string]*ClientConn),
+		groups:         make(map[string]map[string]struct{}),
+		portForwardMgr: NewPortForwardManager(),
 	}
 	// Initialize the default group
 	gateway.groups[""] = make(map[string]struct{})
@@ -203,8 +204,9 @@ func TestGateway_ClientConnManagement(t *testing.T) {
 
 func TestGateway_GetRandomClient(t *testing.T) {
 	gateway := &Gateway{
-		clients: make(map[string]*ClientConn),
-		groups:  make(map[string]map[string]struct{}),
+		clients:        make(map[string]*ClientConn),
+		groups:         make(map[string]map[string]struct{}),
+		portForwardMgr: NewPortForwardManager(),
 	}
 	// Initialize the default group
 	gateway.groups[""] = make(map[string]struct{})

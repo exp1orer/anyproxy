@@ -6,7 +6,6 @@ import (
 	"log"
 	"log/slog"
 	"net"
-	"strings"
 
 	"github.com/things-go/go-socks5"
 
@@ -20,15 +19,10 @@ type GroupBasedCredentialStore struct {
 }
 
 // Valid implements the CredentialStore interface
-// Supports usernames in format "username@group_id" by extracting the base username for authentication
+// Supports usernames in format "username.group_id" by extracting the base username for authentication
 func (g *GroupBasedCredentialStore) Valid(user, password, userAddr string) bool {
 	// Extract the base username (without group_id) for authentication
-	baseUsername := user
-	if strings.Contains(user, "@") {
-		// Split username@group_id and use only the username part for authentication
-		userParts := strings.SplitN(user, "@", 2)
-		baseUsername = userParts[0]
-	}
+	baseUsername := extractBaseUsername(user)
 
 	// Authenticate using the base username and provided password
 	return baseUsername == g.ConfigUsername && password == g.ConfigPassword

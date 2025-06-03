@@ -407,7 +407,7 @@ netstat -an | grep :1080 | wc -l
                                     │  ┌─────────────────┐    ┌─────────────────┐                 │
 ┌─────────────────┐                 │  │   HTTP Proxy    │    │  SOCKS5 Proxy   │                 │
 │   Public Users  │────────────────▶│  │   Port: 8080    │    │   Port: 1080    │                 │
-│   (Internet)    │                 │  │ user@group:pass │    │ user@group:pass │                 │
+│   (Internet)    │                 │  │ user.group:pass │    │ user.group:pass │                 │
 │                 │                 │  └─────────────────┘    └─────────────────┘                 │
 │ • HTTP Requests │                 │           │                       │                         │
 │ • SOCKS5 Reqs   │                 │           └───────────┬───────────┘                         │
@@ -415,7 +415,7 @@ netstat -an | grep :1080 | wc -l
 │   Authentication│                 │              ┌─────────────────┐                            │
 └─────────────────┘                 │              │  Group Router   │                            │
                                     │              │                 │                            │
-                                    │              │ • Extract @group│                            │
+                                    │              │ • Extract .group│                            │
                                     │              │ • Select clients│                            │
                                     │              │ • Load balancing│                            │
                                     │              └─────────────────┘                            │
@@ -458,13 +458,13 @@ netstat -an | grep :1080 | wc -l
 ### Group Authentication Flow
 
 ```
-User Request: curl -x http://user@production:pass@gateway:8080 https://api.example.com
+User Request: curl -x http://user.production:pass@gateway:8080 https://api.example.com
                                     │
                                     ▼
                         ┌─────────────────────┐
                         │   Parse Username    │
                         │                     │
-                        │ user@production     │
+                        │ user.production     │
                         │      ↓              │
                         │ Base: user          │
                         │ Group: production   │
@@ -500,19 +500,19 @@ User Request: curl -x http://user@production:pass@gateway:8080 https://api.examp
 
 ### Group Routing Examples
 
-AnyProxy supports group routing, allowing you to route requests to specific client groups based on the username format `username@group-id`.
+AnyProxy supports group routing, allowing you to route requests to specific client groups based on the username format `username.group-id`.
 
 #### Multi-Environment Deployment
 
 ```bash
 # Route to production environment clients
-curl -x http://user@production:password@127.0.0.1:8080 https://api.example.com
+curl -x http://user.production:password@127.0.0.1:8080 https://api.example.com
 
 # Route to testing environment clients  
-curl -x http://user@testing:password@127.0.0.1:8080 https://api.example.com
+curl -x http://user.testing:password@127.0.0.1:8080 https://api.example.com
 
 # Route to development environment clients
-curl -x http://user@development:password@127.0.0.1:8080 https://api.example.com
+curl -x http://user.development:password@127.0.0.1:8080 https://api.example.com
 
 # Use default group (backward compatibility)
 curl -x http://user:password@127.0.0.1:8080 https://api.example.com
@@ -522,13 +522,13 @@ curl -x http://user:password@127.0.0.1:8080 https://api.example.com
 
 ```bash
 # Route through US East clients
-curl -x http://user@us-east:password@127.0.0.1:8080 https://api.example.com
+curl -x http://user.us-east:password@127.0.0.1:8080 https://api.example.com
 
 # Route through EU West clients
-curl -x http://user@eu-west:password@127.0.0.1:8080 https://api.example.com
+curl -x http://user.eu-west:password@127.0.0.1:8080 https://api.example.com
 
 # Route through Asia Pacific clients
-curl -x http://user@asia-pacific:password@127.0.0.1:8080 https://api.example.com
+curl -x http://user.asia-pacific:password@127.0.0.1:8080 https://api.example.com
 ```
 
 ### Group Client Configuration
@@ -562,35 +562,35 @@ client:
 
 ```bash
 # Tenant A routes to dedicated client group
-curl -x http://tenant-a@prod:secret@proxy:8080 https://api.saas.com/tenant-a/data
+curl -x http://tenant-a.prod:secret@proxy:8080 https://api.saas.com/tenant-a/data
 
 # Tenant B routes to different client groups  
-curl -x http://tenant-b@prod:secret@proxy:8080 https://api.saas.com/tenant-b/data
+curl -x http://tenant-b.prod:secret@proxy:8080 https://api.saas.com/tenant-b/data
 
 # Development tenant routes to development environment
-curl -x http://tenant-dev@dev:secret@proxy:8080 https://api.saas.com/dev/data
+curl -x http://tenant-dev.dev:secret@proxy:8080 https://api.saas.com/dev/data
 ```
 
 ### Microservice Architecture
 
 ```bash
 # Route to API gateway client
-curl -x http://api@gateway-group:pass@proxy:8080 https://api.internal.com
+curl -x http://api.prod:pass@proxy:8080 https://api.internal.com
 
 # Route to database proxy client
-curl -x http://db@database-group:pass@proxy:8080 https://db.internal.com
+curl -x http://db.prod:pass@proxy:8080 https://db.internal.com
 
 # Route to cache proxy client  
-curl -x http://cache@cache-group:pass@proxy:8080 https://cache.internal.com
+curl -x http://cache.prod:pass@proxy:8080 https://cache.internal.com
 ```
 
 ### Geographic Load Distribution
 
 ```bash
 # Route to nearest region based on group
-curl -x http://user@us-west:pass@proxy:8080 https://api.example.com    # Route to US West client
-curl -x http://user@eu-central:pass@proxy:8080 https://api.example.com # Route to EU Central client
-curl -x http://user@asia-east:pass@proxy:8080 https://api.example.com  # Route to Asia East client
+curl -x http://user.us-west:pass@proxy:8080 https://api.example.com    # Route to US West client
+curl -x http://user.eu-central:pass@proxy:8080 https://api.example.com # Route to EU Central client
+curl -x http://user.asia-east:pass@proxy:8080 https://api.example.com  # Route to Asia East client
 ```
 
 ## 🐳 Advanced Docker Configuration
@@ -734,7 +734,7 @@ import (
 
 func main() {
     // Configure HTTP proxy with group routing
-    proxyURL, _ := url.Parse("http://user@production:password@gateway.example.com:8080")
+    proxyURL, _ := url.Parse("http://user.production:password@gateway.example.com:8080")
     
     transport := &http.Transport{
         Proxy: http.ProxyURL(proxyURL),
@@ -770,7 +770,7 @@ import (
 
 func main() {
     // Configure SOCKS5 proxy with group routing
-    proxyURL := "socks5://user@production:password@gateway.example.com:1080"
+    proxyURL := "socks5://user.production:password@gateway.example.com:1080"
     u, _ := url.Parse(proxyURL)
     
     // Create SOCKS5 dialer

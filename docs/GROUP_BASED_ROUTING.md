@@ -7,7 +7,7 @@ AnyProxy supports group-based client routing, allowing users to select specific 
 ## Features
 
 ### 1. Username Format Support
-- **Standard Format**: `username@group-id`
+- **Standard Format**: `username.group-id`
 - **Backward Compatible**: Plain `username` (uses default group)
 - **Automatic Parsing**: Extracts group-id from username automatically
 
@@ -72,17 +72,17 @@ proxy:
 
 ```bash
 # Route to production group
-curl -x http://user@production:proxy_pass@gateway:8080 https://api.example.com
+curl -x http://user.production:proxy_pass@gateway:8080 https://api.example.com
 
 # Route to testing group
-curl -x http://user@testing:proxy_pass@gateway:8080 https://api.example.com
+curl -x http://user.testing:proxy_pass@gateway:8080 https://api.example.com
 
 # Route to default group
 curl -x http://user:proxy_pass@gateway:8080 https://api.example.com
 
 # Environment variables
-export http_proxy=http://user@production:proxy_pass@gateway:8080
-export https_proxy=http://user@production:proxy_pass@gateway:8080
+export http_proxy=http://user.production:proxy_pass@gateway:8080
+export https_proxy=http://user.production:proxy_pass@gateway:8080
 curl https://api.example.com
 ```
 
@@ -90,16 +90,16 @@ curl https://api.example.com
 
 ```bash
 # Route to production group
-curl --socks5 user@production:proxy_pass@gateway:1080 https://api.example.com
+curl --socks5 user.production:proxy_pass@gateway:1080 https://api.example.com
 
 # Route to testing group
-curl --socks5 user@testing:proxy_pass@gateway:1080 https://api.example.com
+curl --socks5 user.testing:proxy_pass@gateway:1080 https://api.example.com
 
 # Route to default group
 curl --socks5 user:proxy_pass@gateway:1080 https://api.example.com
 
 # Environment variables
-export ALL_PROXY=socks5://user@production:proxy_pass@gateway:1080
+export ALL_PROXY=socks5://user.production:proxy_pass@gateway:1080
 curl https://api.example.com
 ```
 
@@ -113,31 +113,43 @@ import (
     "net/url"
 )
 
-// HTTP proxy with group selection
-proxyURL, _ := url.Parse("http://user@production:proxy_pass@gateway:8080")
-transport := &http.Transport{
-    Proxy: http.ProxyURL(proxyURL),
+func main() {
+    // Configure HTTP proxy with group routing
+    proxyURL, _ := url.Parse("http://user.production:proxy_pass@gateway:8080")
+    
+    transport := &http.Transport{
+        Proxy: http.ProxyURL(proxyURL),
+    }
+    
+    client := &http.Client{Transport: transport}
+    
+    resp, err := client.Get("https://api.example.com")
 }
-client := &http.Client{Transport: transport}
-
-resp, err := client.Get("https://api.example.com")
-```
 
 #### Go with SOCKS5
 
 ```go
 import (
-    "golang.org/x/net/proxy"
     "net/url"
+    
+    "golang.org/x/net/proxy"
 )
 
-// SOCKS5 proxy with group selection
-proxyURL := "socks5://user@production:proxy_pass@gateway:1080"
-u, _ := url.Parse(proxyURL)
-dialer, _ := proxy.FromURL(u, proxy.Direct)
-
-conn, err := dialer.Dial("tcp", "api.example.com:443")
-```
+func main() {
+    // Configure SOCKS5 proxy with group routing
+    proxyURL := "socks5://user.production:proxy_pass@gateway:1080"
+    u, _ := url.Parse(proxyURL)
+    
+    // Create SOCKS5 dialer
+    dialer, err := proxy.FromURL(u, proxy.Direct)
+    if err != nil {
+        fmt.Printf("Error creating dialer: %v\n", err)
+        return
+    }
+    
+    // Connect through production group clients
+    conn, err := dialer.Dial("tcp", "api.example.com:443")
+}
 
 ## Deployment Scenarios
 
@@ -205,24 +217,24 @@ client:
 Usage:
 ```bash
 # Route through US East clients
-curl -x http://user@us-east:pass@gateway:8080 https://api.example.com
+curl -x http://user.us-east:pass@gateway:8080 https://api.example.com
 
 # Route through EU West clients
-curl -x http://user@eu-west:pass@gateway:8080 https://api.example.com
+curl -x http://user.eu-west:pass@gateway:8080 https://api.example.com
 ```
 
 ## Technical Implementation
 
 ### Authentication with Group-Based Usernames
 
-Both HTTP and SOCKS5 proxies have been enhanced to properly handle authentication when usernames contain group information in the `username@group-id` format.
+Both HTTP and SOCKS5 proxies have been enhanced to properly handle authentication when usernames contain group information in the `username.group-id` format.
 
 #### Authentication Logic
 
-**Before Fix**: Authentication would fail because the full `username@group-id` was compared against the configured username.
+**Before Fix**: Authentication would fail because the full `username.group-id` was compared against the configured username.
 
 **After Fix**: 
-1. Extract the base username (part before `@`) for authentication
+1. Extract the base username (part before `.`) for authentication
 2. Validate the base username and password against configuration
 3. Store the full username (including group-id) for group extraction
 4. Maintain backward compatibility with plain usernames
@@ -232,8 +244,8 @@ Both HTTP and SOCKS5 proxies have been enhanced to properly handle authenticatio
 ```go
 // Extract base username for authentication
 baseUsername := username
-if strings.Contains(username, "@") {
-    userParts := strings.SplitN(username, "@", 2)
+if strings.Contains(username, ".") {
+    userParts := strings.SplitN(username, ".", 2)
     baseUsername = userParts[0]
 }
 
@@ -255,8 +267,8 @@ func (c *CustomUserPassAuthenticator) Authenticate(reader io.Reader, writer io.W
     // Read username and password from SOCKS5 protocol
     // Extract base username for authentication
     baseUsername := usernameStr
-    if strings.Contains(usernameStr, "@") {
-        userParts := strings.SplitN(usernameStr, "@", 2)
+    if strings.Contains(usernameStr, ".") {
+        userParts := strings.SplitN(usernameStr, ".", 2)
         baseUsername = userParts[0]
     }
     
@@ -289,7 +301,7 @@ The `extractGroupFromUsername` function parses usernames:
 
 ```go
 func (g *Gateway) extractGroupFromUsername(username string) string {
-    parts := strings.Split(username, "@")
+    parts := strings.Split(username, ".")
     if len(parts) == 2 {
         return parts[1] // Return group-id part
     }
@@ -335,9 +347,9 @@ wrappedDialFunc := func(ctx context.Context, network, addr string, request *sock
 The system provides detailed logging for group-based routing:
 
 ```
-INFO Gateway received request user=user@production group=production
+INFO Gateway received request user=user.production group=production
 INFO Selected client from group group=production client_id=prod-client-001
-INFO SOCKS5 extracted user info username=user@production group_id=production
+INFO SOCKS5 extracted user info username=user.production group_id=production
 ```
 
 ### Fallback Logging
@@ -400,7 +412,7 @@ docker logs anyproxy-gateway | grep "Selected client from group"
 docker logs anyproxy-gateway | grep "extracted user info"
 
 # Test connectivity
-curl -v -x http://user@testgroup:pass@gateway:8080 https://httpbin.org/ip
+curl -v -x http://user.testgroup:pass@gateway:8080 https://httpbin.org/ip
 ```
 
 ## Best Practices
@@ -456,8 +468,8 @@ curl -v -x http://user@testgroup:pass@gateway:8080 https://httpbin.org/ip
 - Default: `""` (default group)
 
 #### Username Format
-- Format: `username@group-id`
-- Example: `user@production`, `admin@testing`
+- Format: `username.group-id`
+- Example: `user.prod-uuid-123`, `admin.test-env-456`
 - Fallback: Plain username uses default group
 
 ### Environment Variables
@@ -467,9 +479,9 @@ curl -v -x http://user@testgroup:pass@gateway:8080 https://httpbin.org/ip
 export CLIENT_GROUP_ID=production
 
 # Proxy authentication with group
-export HTTP_PROXY=http://user@production:pass@gateway:8080
-export HTTPS_PROXY=http://user@production:pass@gateway:8080
-export ALL_PROXY=socks5://user@production:pass@gateway:1080
+export HTTP_PROXY=http://user.production:pass@gateway:8080
+export HTTPS_PROXY=http://user.production:pass@gateway:8080
+export ALL_PROXY=socks5://user.production:pass@gateway:1080
 ```
 
 ## Examples Repository

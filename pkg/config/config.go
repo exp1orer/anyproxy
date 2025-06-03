@@ -62,17 +62,26 @@ type ServiceLimit struct {
 	Protocol string `yaml:"protocol"` // "tcp" or "udp"
 }
 
+// OpenPort defines a port forwarding configuration
+type OpenPort struct {
+	RemotePort int    `yaml:"remote_port"` // Port to open on the gateway
+	LocalPort  int    `yaml:"local_port"`  // Port to forward to on the client side
+	LocalHost  string `yaml:"local_host"`  // Host to forward to on the client side
+	Protocol   string `yaml:"protocol"`    // "tcp" or "udp"
+}
+
 // ClientConfig represents the configuration for the proxy client
 type ClientConfig struct {
-	GatewayAddr    string   `yaml:"gateway_addr"`
-	GatewayTLSCert string   `yaml:"gateway_tls_cert"`
-	ClientID       string   `yaml:"client_id"`
-	GroupID        string   `yaml:"group_id"`
-	Replicas       int      `yaml:"replicas"`
-	AuthUsername   string   `yaml:"auth_username"`
-	AuthPassword   string   `yaml:"auth_password"`
-	ForbiddenHosts []string `yaml:"forbidden_hosts"`
-	AllowedHosts   []string `yaml:"allowed_hosts"`
+	GatewayAddr    string     `yaml:"gateway_addr"`
+	GatewayTLSCert string     `yaml:"gateway_tls_cert"`
+	ClientID       string     `yaml:"client_id"`
+	GroupID        string     `yaml:"group_id"`
+	Replicas       int        `yaml:"replicas"`
+	AuthUsername   string     `yaml:"auth_username"`
+	AuthPassword   string     `yaml:"auth_password"`
+	ForbiddenHosts []string   `yaml:"forbidden_hosts"`
+	AllowedHosts   []string   `yaml:"allowed_hosts"`
+	OpenPorts      []OpenPort `yaml:"open_ports"`
 }
 
 var conf *Config

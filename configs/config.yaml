@@ -16,7 +16,7 @@ proxy:
     auth_username: ""
     auth_password: ""
   http:
-    listen_addr: ":8080"
+    listen_addr: ":8088"
     auth_username: "user"
     auth_password: "password"
 
@@ -31,7 +31,7 @@ client:
   gateway_addr: "127.0.0.1:8443"
   gateway_tls_cert: "certs/server.crt"
   client_id: "client"
-  group_id: "example-group"
+  # group_id: "example-group"
   replicas: 1
   auth_username: "gateway_user"
   auth_password: "gateway_password"
@@ -46,3 +46,12 @@ client:
     - "example.org"
     - "example.net"
     - ".*"
+  open_ports:
+    - remote_port: 8000
+      protocol: "tcp"
+      local_port: 3000
+      local_host: "10.23.190.125"
+    - remote_port: 8022
+      protocol: "udp"
+      local_port: 22
+      local_host: "192.168.1.1"

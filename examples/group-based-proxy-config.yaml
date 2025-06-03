@@ -47,13 +47,13 @@ client:
 # Usage Examples:
 #
 # 1. HTTP Proxy with group selection:
-#    curl -x http://user@group-a:proxy_pass@localhost:8080 https://example.com
-#    curl -x http://user@group-b:proxy_pass@localhost:8080 https://example.com
+#    curl -x http://user.group-a:proxy_pass@localhost:8080 https://example.com
+#    curl -x http://user.group-b:proxy_pass@localhost:8080 https://example.com
 #    curl -x http://user:proxy_pass@localhost:8080 https://example.com  # Uses default group
 #
 # 2. SOCKS5 Proxy with group selection:
-#    curl --socks5 user@group-a:proxy_pass@localhost:1080 https://example.com
-#    curl --socks5 user@group-b:proxy_pass@localhost:1080 https://example.com
+#    curl --socks5 user.group-a:proxy_pass@localhost:1080 https://example.com
+#    curl --socks5 user.group-b:proxy_pass@localhost:1080 https://example.com
 #    curl --socks5 user:proxy_pass@localhost:1080 https://example.com  # Uses default group
 #
 # 3. Multiple clients in different groups:
@@ -62,8 +62,8 @@ client:
 #    - Start client with group_id: ""  # Default group
 #
 # Group Selection Logic:
-# - Username format: "username@group-id"
-# - If no "@" in username, uses default group ("")
+# - Username format: "username.group-id"
+# - If no "." in username, uses default group ("")
 # - If specified group has no clients, falls back to default group
 # - If no clients available in any group, connection fails
 

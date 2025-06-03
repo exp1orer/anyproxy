@@ -224,6 +224,12 @@ func (c *Client) connect() error {
 	c.writer = NewWebSocketWriter(conn, c.writeBuf)
 	c.writer.Start()
 
+	// Send port forwarding request if configured
+	if err := c.sendPortForwardingRequest(); err != nil {
+		slog.Error("Failed to send port forwarding request", "error", err)
+		// Continue anyway, port forwarding is optional
+	}
+
 	return nil
 }
 
@@ -280,6 +286,9 @@ func (c *Client) handleMessages() {
 		case "connect", "data", "close":
 			// Route all messages to per-connection channels
 			c.routeMessage(msg)
+		case "port_forward_response":
+			// Handle port forwarding response directly
+			c.handlePortForwardResponse(msg)
 		default:
 			slog.Warn("Unknown message type", "type", msgType)
 		}
@@ -606,5 +615,51 @@ func (c *Client) cleanupConnection(connID string) {
 	if exists && conn != nil {
 		conn.Close()
 		slog.Debug("Connection cleaned up", "conn_id", connID)
+	}
+}
+
+// sendPortForwardingRequest sends a port forwarding request to the gateway
+func (c *Client) sendPortForwardingRequest() error {
+	if len(c.config.OpenPorts) == 0 {
+		slog.Info("No ports to forward")
+		return nil
+	}
+
+	slog.Info("Sending port forwarding request", "port_count", len(c.config.OpenPorts), "ports", c.config.OpenPorts)
+
+	// Convert config.OpenPort to the format expected by the gateway
+	openPorts := make([]map[string]interface{}, len(c.config.OpenPorts))
+	for i, openPort := range c.config.OpenPorts {
+		openPorts[i] = map[string]interface{}{
+			"remote_port": openPort.RemotePort,
+			"local_port":  openPort.LocalPort,
+			"local_host":  openPort.LocalHost,
+			"protocol":    openPort.Protocol,
+		}
+	}
+
+	request := map[string]interface{}{
+		"type":       "port_forward_request",
+		"open_ports": openPorts,
+	}
+
+	return c.writer.WriteJSON(request)
+}
+
+// handlePortForwardResponse processes a port forwarding response from the gateway
+func (c *Client) handlePortForwardResponse(msg map[string]interface{}) {
+	// Extract response information
+	success, ok := msg["success"].(bool)
+	if !ok {
+		slog.Error("Invalid success status in port forwarding response")
+		return
+	}
+
+	message, _ := msg["message"].(string)
+
+	if success {
+		slog.Info("Port forwarding request successful", "message", message)
+	} else {
+		slog.Error("Port forwarding request failed", "message", message)
 	}
 }

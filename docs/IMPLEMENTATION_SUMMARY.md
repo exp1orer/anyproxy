@@ -7,7 +7,7 @@ Successfully implemented functionality to extract group-id from the username pro
 ## Core Features Implemented
 
 ### 1. Username Format Parsing
-- Supports `username@group-id` format
+- Supports `username.group-id` format
 - Automatically extracts group-id portion
 - Backward compatible with plain username format
 
@@ -48,7 +48,7 @@ type GroupExtractor func(username string) string
 ### 3. HTTP Proxy Enhancement (`pkg/proxy/httpproxy.go`)
 - Added `NewHTTPProxyWithAuth` function supporting group extraction
 - **Fixed Authentication Logic**: Modified `authenticateAndExtractUser` to properly handle group-based usernames
-  - Extracts base username from `username@group-id` format for authentication
+  - Extracts base username from `username.group-id` format for authentication
   - Validates against configured username and password
   - Maintains backward compatibility with plain usernames
 - Passes user context to dialFn during request processing
@@ -59,7 +59,7 @@ type GroupExtractor func(username string) string
 - **Complete User Information Access**: Extract username from `Request.AuthContext.Payload`
 - **Custom Authentication Implementation**: Created `CustomUserPassAuthenticator` to handle group-based usernames
   - Implements proper SOCKS5 username/password authentication protocol
-  - Extracts base username from `username@group-id` format for authentication
+  - Extracts base username from `username.group-id` format for authentication
   - Stores full username (including group-id) in AuthContext for later use
 - **Real-time Group Extraction**: Dynamically extract group information during each connection
 - **Detailed Logging**: Record user authentication and group selection process
@@ -77,8 +77,8 @@ func (c *CustomUserPassAuthenticator) Authenticate(reader io.Reader, writer io.W
     
     // Extract the base username (without group_id) for authentication
     baseUsername := usernameStr
-    if strings.Contains(usernameStr, "@") {
-        userParts := strings.SplitN(usernameStr, "@", 2)
+    if strings.Contains(usernameStr, ".") {
+        userParts := strings.SplitN(usernameStr, ".", 2)
         baseUsername = userParts[0]
     }
     
@@ -102,12 +102,7 @@ func (h *httpProxy) authenticateAndExtractUser(r *http.Request) (string, string,
     // ... parse Basic authentication ...
     
     // Extract the base username (without group_id) for authentication
-    baseUsername := username
-    if strings.Contains(username, "@") {
-        // Split username@group_id and use only the username part for authentication
-        userParts := strings.SplitN(username, "@", 2)
-        baseUsername = userParts[0]
-    }
+    baseUsername := extractBaseUsername(username)
     
     // Authenticate using the base username and provided password
     authenticated := baseUsername == h.config.AuthUsername && password == h.config.AuthPassword
@@ -121,10 +116,10 @@ func (h *httpProxy) authenticateAndExtractUser(r *http.Request) (string, string,
 ### HTTP Proxy
 ```bash
 # Use production group
-curl -x http://user@production:password@localhost:8080 https://example.com
+curl -x http://user.production:password@localhost:8080 https://example.com
 
 # Use testing group
-curl -x http://user@testing:password@localhost:8080 https://example.com
+curl -x http://user.testing:password@localhost:8080 https://example.com
 
 # Use default group
 curl -x http://user:password@localhost:8080 https://example.com
@@ -133,10 +128,10 @@ curl -x http://user:password@localhost:8080 https://example.com
 ### SOCKS5 Proxy (Full Support)
 ```bash
 # Use production group
-curl --socks5 user@production:password@localhost:1080 https://example.com
+curl --socks5 user.production:password@localhost:1080 https://example.com
 
 # Use testing group
-curl --socks5 user@testing:password@localhost:1080 https://example.com
+curl --socks5 user.testing:password@localhost:1080 https://example.com
 
 # Use default group
 curl --socks5 user:password@localhost:1080 https://example.com
@@ -150,7 +145,7 @@ import (
 )
 
 // Create SOCKS5 proxy URL
-proxyURL := "socks5://user@production:password@localhost:1080"
+proxyURL := "socks5://user.production:password@localhost:1080"
 u, _ := url.Parse(proxyURL)
 
 // Create SOCKS5 dialer
@@ -249,9 +244,9 @@ go build examples/socks5-group-test.go
 
 ### Detailed Logging
 ```
-INFO Gateway received request user=user@production group=production
+INFO Gateway received request user=user.production group=production
 INFO Selected client from group group=production client_id=prod-client-001
-INFO SOCKS5 extracted user info username=user@production group_id=production
+INFO SOCKS5 extracted user info username=user.production group_id=production
 ```
 
 ### Fallback Mechanism Logging

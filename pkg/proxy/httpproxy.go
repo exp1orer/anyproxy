@@ -173,12 +173,7 @@ func (h *httpProxy) authenticateAndExtractUser(r *http.Request) (string, string,
 	username, password := parts[0], parts[1]
 
 	// Extract the base username (without group_id) for authentication
-	baseUsername := username
-	if strings.Contains(username, "@") {
-		// Split username@group_id and use only the username part for authentication
-		userParts := strings.SplitN(username, "@", 2)
-		baseUsername = userParts[0]
-	}
+	baseUsername := extractBaseUsername(username)
 
 	// Authenticate using the base username and provided password
 	authenticated := baseUsername == h.config.AuthUsername && password == h.config.AuthPassword
