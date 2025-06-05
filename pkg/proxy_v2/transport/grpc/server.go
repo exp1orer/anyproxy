@@ -3,7 +3,6 @@ package grpc
 import (
 	"crypto/tls"
 	"fmt"
-	"log/slog"
 	"net"
 	"sync"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/buhuipao/anyproxy/pkg/logger"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
@@ -65,12 +65,12 @@ func (t *grpcTransport) listenAndServe(addr string, handler func(transport.Conne
 	if tlsConfig != nil {
 		protocol = "gRPC/TLS"
 	}
-	slog.Info("Starting gRPC server", "listen_addr", addr, "protocol", protocol)
+	logger.Info("Starting gRPC server", "listen_addr", addr, "protocol", protocol)
 
 	// Create TCP listener
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
-		slog.Error("Failed to create TCP listener", "addr", addr, "error", err)
+		logger.Error("Failed to create TCP listener", "addr", addr, "err", err)
 		return fmt.Errorf("failed to listen on %s: %v", addr, err)
 	}
 	t.listener = listener
@@ -97,7 +97,7 @@ func (t *grpcTransport) listenAndServe(addr string, handler func(transport.Conne
 	if tlsConfig != nil {
 		creds := credentials.NewTLS(tlsConfig)
 		opts = append(opts, grpc.Creds(creds))
-		slog.Debug("gRPC server TLS configured")
+		logger.Debug("gRPC server TLS configured")
 	}
 
 	// Create gRPC server
@@ -108,34 +108,26 @@ func (t *grpcTransport) listenAndServe(addr string, handler func(transport.Conne
 		transport: t,
 	})
 
-	slog.Info("gRPC server registered",
-		"addr", addr,
-		"keepalive_time", "30s",
-		"max_idle", "5m",
-		"max_age", "30m")
+	logger.Info("gRPC server registered", "addr", addr, "keepalive_time", "30s", "max_idle", "5m", "max_age", "30m")
 
 	// Start serving in a goroutine
 	go func() {
-		slog.Info("Starting gRPC server", "addr", addr, "protocol", protocol)
+		logger.Info("Starting gRPC server", "addr", addr, "protocol", protocol)
 		if err := t.server.Serve(listener); err != nil {
-			slog.Error("gRPC server error", "protocol", protocol, "error", err)
+			logger.Error("gRPC server error", "protocol", protocol, "err", err)
 		} else {
-			slog.Info("gRPC server stopped", "protocol", protocol)
+			logger.Info("gRPC server stopped", "protocol", protocol)
 		}
 	}()
 
 	t.running = true
-	slog.Info("gRPC server started successfully", "addr", addr, "protocol", protocol)
+	logger.Info("gRPC server started successfully", "addr", addr, "protocol", protocol)
 	return nil
 }
 
 // DialWithConfig implements Transport interface - client connection
 func (t *grpcTransport) DialWithConfig(addr string, config *transport.ClientConfig) (transport.Connection, error) {
-	slog.Debug("gRPC transport dialing with config",
-		"addr", addr,
-		"client_id", config.ClientID,
-		"group_id", config.GroupID,
-		"tls_enabled", config.TLSConfig != nil)
+	logger.Debug("gRPC transport dialing with config", "addr", addr, "client_id", config.ClientID, "group_id", config.GroupID, "tls_enabled", config.TLSConfig != nil)
 
 	return t.dialGRPCWithConfig(addr, config)
 }
@@ -149,10 +141,10 @@ func (t *grpcTransport) Close() error {
 		return nil
 	}
 
-	slog.Info("Stopping gRPC server")
+	logger.Info("Stopping gRPC server")
 
 	if t.server != nil {
-		slog.Debug("Starting graceful gRPC server shutdown")
+		logger.Debug("Starting graceful gRPC server shutdown")
 
 		gracefulDone := make(chan struct{})
 		go func() {
@@ -163,21 +155,24 @@ func (t *grpcTransport) Close() error {
 		timeout := time.After(5 * time.Second)
 		select {
 		case <-gracefulDone:
-			slog.Debug("gRPC server gracefully stopped")
+			logger.Debug("gRPC server gracefully stopped")
 		case <-timeout:
-			slog.Warn("gRPC graceful shutdown timeout, forcing stop")
+			logger.Warn("gRPC graceful shutdown timeout, forcing stop")
 			t.server.Stop()
-			slog.Debug("gRPC server forcefully stopped")
+			logger.Debug("gRPC server forcefully stopped")
 		}
 	}
 
-	if t.listener != nil {
-		t.listener.Close()
-		slog.Debug("gRPC listener closed")
-	}
+	defer func() {
+		logger.Debug("Shutting down gRPC transport server")
+		if err := t.listener.Close(); err != nil {
+			logger.Debug("Error closing gRPC listener", "err", err)
+		}
+		logger.Debug("gRPC transport server shutdown completed")
+	}()
 
 	t.running = false
-	slog.Info("gRPC server stopped successfully")
+	logger.Info("gRPC server stopped successfully")
 	return nil
 }
 
@@ -192,7 +187,7 @@ func (s *transportServer) BiStream(stream TransportService_BiStreamServer) error
 	// Extract metadata from context
 	md, ok := metadata.FromIncomingContext(stream.Context())
 	if !ok {
-		slog.Warn("gRPC connection rejected: missing metadata")
+		logger.Warn("gRPC connection rejected: missing metadata")
 		return fmt.Errorf("missing metadata")
 	}
 
@@ -203,28 +198,22 @@ func (s *transportServer) BiStream(stream TransportService_BiStreamServer) error
 	password := getMetadataValue(md, "password")
 
 	if clientID == "" {
-		slog.Warn("gRPC connection rejected: missing client ID")
+		logger.Warn("gRPC connection rejected: missing client ID")
 		return fmt.Errorf("client ID is required")
 	}
 
-	slog.Debug("gRPC connection attempt",
-		"client_id", clientID,
-		"group_id", groupID)
+	logger.Debug("gRPC connection attempt", "client_id", clientID, "group_id", groupID)
 
 	// Authentication check
 	if s.transport.authConfig != nil && s.transport.authConfig.Username != "" {
 		if username != s.transport.authConfig.Username || password != s.transport.authConfig.Password {
-			slog.Warn("gRPC connection rejected: invalid credentials",
-				"client_id", clientID,
-				"username", username)
+			logger.Warn("gRPC connection rejected: invalid credentials", "client_id", clientID, "username", username)
 			return fmt.Errorf("unauthorized")
 		}
-		slog.Debug("Client authentication successful", "client_id", clientID)
+		logger.Debug("Client authentication successful", "client_id", clientID)
 	}
 
-	slog.Info("Client connected via gRPC",
-		"client_id", clientID,
-		"group_id", groupID)
+	logger.Info("Client connected via gRPC", "client_id", clientID, "group_id", groupID)
 
 	// Create connection wrapper
 	conn := newGRPCServerConnection(stream, clientID, groupID)
@@ -234,27 +223,24 @@ func (s *transportServer) BiStream(stream TransportService_BiStreamServer) error
 	go func() {
 		defer func() {
 			// Only do necessary cleanup, don't hide panic
-			conn.Close()
+			if err := conn.Close(); err != nil {
+				logger.Debug("Error closing connection", "err", err)
+			}
 		}()
 
 		if s.transport.handler != nil {
 			s.transport.handler(conn)
 		} else {
-			slog.Warn("No connection handler set, closing connection",
-				"client_id", clientID)
+			logger.Warn("No connection handler set, closing connection", "client_id", clientID)
 		}
 	}()
 
 	// Wait for stream context cancellation (connection close)
 	<-stream.Context().Done()
 
-	slog.Debug("gRPC stream context cancelled",
-		"client_id", clientID,
-		"error", stream.Context().Err())
+	logger.Debug("gRPC stream context cancelled", "client_id", clientID, "err", stream.Context().Err())
 
-	slog.Info("Client disconnected from gRPC",
-		"client_id", clientID,
-		"group_id", groupID)
+	logger.Info("Client disconnected from gRPC", "client_id", clientID, "group_id", groupID)
 
 	return stream.Context().Err()
 }

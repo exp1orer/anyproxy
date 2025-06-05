@@ -27,7 +27,7 @@ func TestNewHTTPProxy(t *testing.T) {
 	}
 
 	// Mock dial function
-	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialFunc := func(_ context.Context, network, addr string) (net.Conn, error) {
 		return net.Dial(network, addr)
 	}
 
@@ -63,7 +63,7 @@ func TestNewHTTPProxy_NilValidation(t *testing.T) {
 	}
 
 	// Test with nil config
-	_, err := NewHTTPProxy(nil, func(ctx context.Context, network, addr string) (net.Conn, error) {
+	_, err := NewHTTPProxy(nil, func(_ context.Context, _, _ string) (net.Conn, error) {
 		return nil, nil
 	})
 	assert.Error(t, err)
@@ -83,7 +83,7 @@ func TestHTTPProxyStartStop(t *testing.T) {
 	}
 
 	// Mock dial function
-	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialFunc := func(_ context.Context, network, addr string) (net.Conn, error) {
 		return net.Dial(network, addr)
 	}
 
@@ -116,7 +116,7 @@ func TestHTTPProxyAuthenticate(t *testing.T) {
 	}
 
 	// Mock dial function
-	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialFunc := func(_ context.Context, network, addr string) (net.Conn, error) {
 		return net.Dial(network, addr)
 	}
 
@@ -147,7 +147,7 @@ func TestHTTPProxy_DialConn(t *testing.T) {
 	}
 
 	// Mock dial function that returns a mock connection
-	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialFunc := func(_ context.Context, _, _ string) (net.Conn, error) {
 		return &mockConn{}, nil
 	}
 
@@ -168,7 +168,7 @@ func TestHTTPProxy_DialConnError(t *testing.T) {
 	}
 
 	// Mock dial function that returns an error
-	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialFunc := func(_ context.Context, _, _ string) (net.Conn, error) {
 		return nil, fmt.Errorf("dial failed")
 	}
 
@@ -189,7 +189,7 @@ func TestHTTPProxy_SetListenAddr(t *testing.T) {
 		AuthPassword: "testpass",
 	}
 
-	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialFunc := func(_ context.Context, _, _ string) (net.Conn, error) {
 		return &mockConn{}, nil
 	}
 
@@ -211,7 +211,7 @@ func TestHTTPProxy_ServeHTTP(t *testing.T) {
 		AuthPassword: "testpass",
 	}
 
-	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialFunc := func(_ context.Context, _, _ string) (net.Conn, error) {
 		return &mockConn{}, nil
 	}
 
@@ -289,7 +289,7 @@ func TestHTTPProxy_Authenticate(t *testing.T) {
 		AuthPassword: "testpass",
 	}
 
-	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialFunc := func(_ context.Context, _, _ string) (net.Conn, error) {
 		return &mockConn{}, nil
 	}
 
@@ -350,13 +350,15 @@ func TestHTTPProxy_HandleHTTP(t *testing.T) {
 	}
 
 	// Mock dial function that creates a test server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Hello, World!"))
+		if _, writeErr := w.Write([]byte("Hello, World!")); writeErr != nil {
+			t.Logf("Error writing response: %v", writeErr)
+		}
 	}))
 	defer server.Close()
 
-	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialFunc := func(_ context.Context, _, addr string) (net.Conn, error) {
 		// Extract host and port from server URL
 		serverURL := strings.TrimPrefix(server.URL, "http://")
 		if addr == "example.com:80" {
@@ -385,19 +387,31 @@ func TestHTTPProxy_HandleHTTP(t *testing.T) {
 func TestHTTPProxy_Transfer(t *testing.T) {
 	// Create a pipe to simulate connection
 	client, server := net.Pipe()
-	defer client.Close()
-	defer server.Close()
+	defer func() {
+		if err := client.Close(); err != nil {
+			t.Logf("Error closing client: %v", err)
+		}
+	}()
+	defer func() {
+		if err := server.Close(); err != nil {
+			t.Logf("Error closing server: %v", err)
+		}
+	}()
 
 	// Start transfer in goroutine
 	go func() {
 		// Write some data from server side
-		server.Write([]byte("Hello from server"))
-		server.Close()
+		if _, writeErr := server.Write([]byte("Hello from server")); writeErr != nil {
+			t.Logf("Error writing to server: %v", writeErr)
+		}
+		if closeErr := server.Close(); closeErr != nil {
+			t.Logf("Error closing server in goroutine: %v", closeErr)
+		}
 	}()
 
 	// Test transfer function
 	cfg := &config.HTTPConfig{}
-	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialFunc := func(_ context.Context, _, _ string) (net.Conn, error) {
 		return &mockConn{}, nil
 	}
 
@@ -428,7 +442,7 @@ func TestHTTPProxy_InterfaceCompliance(t *testing.T) {
 		AuthPassword: "testpass",
 	}
 
-	dialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialFunc := func(_ context.Context, _, _ string) (net.Conn, error) {
 		return &mockConn{}, nil
 	}
 
@@ -436,50 +450,7 @@ func TestHTTPProxy_InterfaceCompliance(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify that httpProxy implements GatewayProxy interface
-	var _ GatewayProxy = proxy
-}
-
-// Mock connection with writer for testing transfer
-type mockConnWithWriter struct {
-	net.Conn
-	writer io.Writer
-	closed bool
-}
-
-func (m *mockConnWithWriter) Write(data []byte) (int, error) {
-	if m.writer != nil {
-		return m.writer.Write(data)
-	}
-	return len(data), nil
-}
-
-func (m *mockConnWithWriter) Close() error {
-	m.closed = true
-	return nil
-}
-
-func (m *mockConnWithWriter) Read(buf []byte) (int, error) {
-	return 0, io.EOF
-}
-
-func (m *mockConnWithWriter) LocalAddr() net.Addr {
-	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0}
-}
-
-func (m *mockConnWithWriter) RemoteAddr() net.Addr {
-	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 80}
-}
-
-func (m *mockConnWithWriter) SetDeadline(t time.Time) error {
-	return nil
-}
-
-func (m *mockConnWithWriter) SetReadDeadline(t time.Time) error {
-	return nil
-}
-
-func (m *mockConnWithWriter) SetWriteDeadline(t time.Time) error {
-	return nil
+	var _ = proxy
 }
 
 // TestHTTPProxy_AuthenticateWithGroupID tests authentication with group-based usernames

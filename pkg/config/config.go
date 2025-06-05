@@ -1,3 +1,6 @@
+// Package config provides configuration management for AnyProxy.
+// It supports loading configuration from YAML files and provides
+// structured configuration types for all components.
 package config
 
 import (
@@ -49,8 +52,8 @@ type SOCKS5Config struct {
 	AuthPassword string `yaml:"auth_password"`
 }
 
-// TransportConfig represents the configuration for the transport
-
+// TransportConfig represents the configuration for the transport layer.
+// It specifies which transport protocol to use (websocket, grpc, or quic).
 type TransportConfig struct {
 	Type string `yaml:"type"`
 }
@@ -95,7 +98,7 @@ var conf *Config
 
 // LoadConfig loads configuration from a YAML file
 func LoadConfig(filename string) (*Config, error) {
-	data, err := os.ReadFile(filename)
+	data, err := os.ReadFile(filename) // nolint:gosec // Config file path is provided by user via command line
 	if err != nil {
 		return nil, err
 	}

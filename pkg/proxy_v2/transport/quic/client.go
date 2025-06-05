@@ -1,3 +1,4 @@
+// Package quic provides QUIC transport implementation for AnyProxy v2.
 package quic
 
 import (
@@ -5,23 +6,21 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/quic-go/quic-go"
 
+	"github.com/buhuipao/anyproxy/pkg/logger"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
 // dialQUICWithConfig connects to QUIC server with configuration
 func (t *quicTransport) dialQUICWithConfig(addr string, config *transport.ClientConfig) (transport.Connection, error) {
-	slog.Debug("Establishing QUIC connection to gateway",
-		"client_id", config.ClientID,
-		"gateway_addr", addr)
+	logger.Debug("Establishing QUIC connection to gateway", "client_id", config.ClientID, "gateway_addr", addr)
 
 	// Set up TLS configuration
 	tlsConfig := &tls.Config{
-		InsecureSkipVerify: config.SkipVerify,
+		InsecureSkipVerify: config.SkipVerify, // nolint:gosec // User-configurable for development environments
 		NextProtos:         []string{"anyproxy-quic"},
 	}
 
@@ -33,9 +32,7 @@ func (t *quicTransport) dialQUICWithConfig(addr string, config *transport.Client
 		}
 	}
 
-	slog.Debug("QUIC TLS configuration prepared",
-		"client_id", config.ClientID,
-		"skip_verify", tlsConfig.InsecureSkipVerify)
+	logger.Debug("QUIC TLS configuration prepared", "client_id", config.ClientID, "skip_verify", tlsConfig.InsecureSkipVerify)
 
 	// 🚨 Fix: Configure QUIC keepalive and idle timeout to prevent unexpected connection drops
 	quicConfig := &quic.Config{
@@ -47,56 +44,48 @@ func (t *quicTransport) dialQUICWithConfig(addr string, config *transport.Client
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	slog.Info("Connecting to QUIC endpoint",
-		"client_id", config.ClientID,
-		"addr", addr,
-		"keepalive_period", "30s",
-		"idle_timeout", "5m")
+	logger.Info("Connecting to QUIC endpoint", "client_id", config.ClientID, "addr", addr, "keepalive_period", "30s", "idle_timeout", "5m")
 
 	// Establish QUIC connection
 	conn, err := quic.DialAddr(ctx, addr, tlsConfig, quicConfig)
 	if err != nil {
-		slog.Error("Failed to connect to QUIC server",
-			"client_id", config.ClientID,
-			"addr", addr,
-			"error", err)
+		logger.Error("Failed to connect to QUIC server", "client_id", config.ClientID, "addr", addr, "err", err)
 		return nil, fmt.Errorf("failed to connect to QUIC server: %v", err)
 	}
 
-	slog.Debug("QUIC connection established", "client_id", config.ClientID)
+	logger.Debug("QUIC connection established", "client_id", config.ClientID)
 
 	// Open a stream for communication
-	stream, err := conn.OpenStreamSync(ctx)
+	stream, err := conn.OpenStreamSync(context.Background())
 	if err != nil {
-		conn.CloseWithError(0, "failed to open stream")
-		slog.Error("Failed to open QUIC stream",
-			"client_id", config.ClientID,
-			"error", err)
-		return nil, fmt.Errorf("failed to open QUIC stream: %v", err)
+		logger.Error("Failed to open QUIC stream", "client_id", config.ClientID, "err", err)
+		if closeErr := conn.CloseWithError(0, "failed to open stream"); closeErr != nil {
+			logger.Debug("Error closing QUIC connection after stream failure", "err", closeErr)
+		}
+		return nil, fmt.Errorf("failed to open stream: %v", err)
 	}
 
-	slog.Debug("QUIC stream opened", "client_id", config.ClientID)
+	logger.Debug("QUIC stream opened", "client_id", config.ClientID)
 
 	// 🚨 Fix: Send authentication message and wait for response
 	if err := t.authenticateClient(stream, config); err != nil {
-		conn.CloseWithError(1, "authentication failed")
+		if closeErr := conn.CloseWithError(1, "authentication failed"); closeErr != nil {
+			logger.Debug("Error closing QUIC connection after auth failure", "err", closeErr)
+		}
 		return nil, fmt.Errorf("authentication failed: %v", err)
 	}
 
 	// Create client connection
 	quicConn := newQUICConnection(stream, conn, config.ClientID, config.GroupID)
 
-	slog.Info("QUIC connection established successfully",
-		"client_id", config.ClientID)
+	logger.Info("QUIC connection established successfully", "client_id", config.ClientID)
 
 	return quicConn, nil
 }
 
 // authenticateClient sends authentication message and waits for server response
 func (t *quicTransport) authenticateClient(stream quic.Stream, config *transport.ClientConfig) error {
-	slog.Debug("Starting QUIC client authentication",
-		"client_id", config.ClientID,
-		"group_id", config.GroupID)
+	logger.Debug("Starting QUIC client authentication", "client_id", config.ClientID, "group_id", config.GroupID)
 
 	// Create authentication message
 	authMsg := map[string]interface{}{
@@ -141,8 +130,7 @@ func (t *quicTransport) authenticateClient(stream quic.Stream, config *transport
 		return fmt.Errorf("failed to send auth message: %v", err)
 	}
 
-	slog.Debug("Auth message sent, waiting for response",
-		"client_id", config.ClientID)
+	logger.Debug("Auth message sent, waiting for response", "client_id", config.ClientID)
 
 	// Start receive loop to read response
 	go func() {
@@ -194,9 +182,7 @@ func (t *quicTransport) authenticateClient(stream quic.Stream, config *transport
 		return fmt.Errorf("authentication failed: %s", reason)
 	}
 
-	slog.Debug("QUIC client authentication successful",
-		"client_id", config.ClientID,
-		"group_id", config.GroupID)
+	logger.Debug("QUIC client authentication successful", "client_id", config.ClientID, "group_id", config.GroupID)
 
 	return nil
 }

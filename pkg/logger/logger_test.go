@@ -104,7 +104,7 @@ func TestFileLogging(t *testing.T) {
 	}
 
 	// Read log file content
-	content, err := os.ReadFile(logFile)
+	content, err := os.ReadFile(logFile) // nolint:gosec // Reading test log file that was just created
 	if err != nil {
 		t.Fatalf("Failed to read log file: %v", err)
 	}

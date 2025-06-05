@@ -1,3 +1,4 @@
+// Package transport provides transport layer abstractions for AnyProxy v2.
 package transport
 
 import (

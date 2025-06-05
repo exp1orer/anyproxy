@@ -1,8 +1,9 @@
+// Package main implements the AnyProxy client application.
+// This is the v1 client that connects to the gateway and handles proxy requests.
 package main
 
 import (
 	"flag"
-	"log/slog"
 	"os"
 	"os/signal"
 	"sync"
@@ -21,13 +22,13 @@ func main() {
 	// Load configuration
 	cfg, err := config.LoadConfig(*configFile)
 	if err != nil {
-		slog.Error("Failed to load configuration", "error", err)
+		logger.Error("Failed to load configuration", "err", err)
 		os.Exit(1)
 	}
 
 	// Initialize logger
 	if err := logger.Init(&cfg.Log); err != nil {
-		slog.Error("Failed to initialize logger", "error", err)
+		logger.Error("Failed to initialize logger", "err", err)
 		os.Exit(1)
 	}
 
@@ -36,19 +37,19 @@ func main() {
 		// Create and start client
 		client, err := proxy.NewClient(&cfg.Client)
 		if err != nil {
-			slog.Error("Failed to create client", "error", err)
+			logger.Error("Failed to create client", "err", err)
 			os.Exit(1)
 		}
 
 		// Start client (non-blocking)
 		if err := client.Start(); err != nil {
-			slog.Error("Failed to start client", "error", err)
+			logger.Error("Failed to start client", "err", err)
 			os.Exit(1)
 		}
 
 		clients = append(clients, client)
 	}
-	slog.Info("Started clients", "count", cfg.Client.Replicas, "gateway_addr", cfg.Client.GatewayAddr)
+	logger.Info("Started clients", "count", cfg.Client.Replicas, "gateway_addr", cfg.Client.GatewayAddr)
 
 	// Handle signals for graceful shutdown
 	sigCh := make(chan os.Signal, 1)
@@ -56,7 +57,7 @@ func main() {
 
 	// Wait for termination signal
 	<-sigCh
-	slog.Info("Shutting down...")
+	logger.Info("Shutting down...")
 
 	// Stop all clients concurrently
 	var stopWg sync.WaitGroup
@@ -65,12 +66,12 @@ func main() {
 		go func(c *proxy.Client) {
 			defer stopWg.Done()
 			if err := c.Stop(); err != nil {
-				slog.Error("Error shutting down client", "error", err)
+				logger.Error("Error shutting down client", "err", err)
 			}
 		}(client)
 	}
 
 	// Wait for all clients to stop
 	stopWg.Wait()
-	slog.Info("All clients stopped")
+	logger.Info("All clients stopped")
 }

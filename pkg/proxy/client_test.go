@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -195,14 +194,14 @@ func TestProxyClient_CleanupConnection(t *testing.T) {
 
 	// Setup connection and message channel
 	mockConn := &mockConn{closed: false}
-	client.conns["test-conn"] = mockConn
-	client.msgChans["test-conn"] = make(chan map[string]interface{}, 1)
+	client.conns[TestConnID] = mockConn
+	client.msgChans[TestConnID] = make(chan map[string]interface{}, 1)
 
-	client.cleanupConnection("test-conn")
+	client.cleanupConnection(TestConnID)
 
-	assert.True(t, mockConn.closed)
-	assert.NotContains(t, client.conns, "test-conn")
-	assert.NotContains(t, client.msgChans, "test-conn")
+	// Verify connection was removed
+	assert.NotContains(t, client.conns, TestConnID)
+	assert.NotContains(t, client.msgChans, TestConnID)
 }
 
 func TestProxyClient_RouteMessage(t *testing.T) {
@@ -242,7 +241,7 @@ func TestProxyClient_RouteMessage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(_ *testing.T) {
 			tt.setup()
 			// This test mainly ensures no panic occurs
 			client.routeMessage(tt.msg)
@@ -256,7 +255,7 @@ func TestProxyClient_HandleDataMessage(t *testing.T) {
 
 	// Setup mock connection
 	mockConn := &mockConn{writeData: make([]byte, 0)}
-	client.conns["test-conn"] = mockConn
+	client.conns[TestConnID] = mockConn
 
 	tests := []struct {
 		name    string
@@ -266,7 +265,7 @@ func TestProxyClient_HandleDataMessage(t *testing.T) {
 		{
 			name: "valid data message",
 			msg: map[string]interface{}{
-				"id":   "test-conn",
+				"id":   TestConnID,
 				"data": base64.StdEncoding.EncodeToString([]byte("hello world")),
 			},
 			wantErr: false,
@@ -281,7 +280,7 @@ func TestProxyClient_HandleDataMessage(t *testing.T) {
 		{
 			name: "invalid data format",
 			msg: map[string]interface{}{
-				"id":   "test-conn",
+				"id":   TestConnID,
 				"data": 123, // not a string
 			},
 			wantErr: true,
@@ -289,7 +288,7 @@ func TestProxyClient_HandleDataMessage(t *testing.T) {
 		{
 			name: "invalid base64 data",
 			msg: map[string]interface{}{
-				"id":   "test-conn",
+				"id":   TestConnID,
 				"data": "invalid-base64!@#",
 			},
 			wantErr: true,
@@ -308,7 +307,7 @@ func TestProxyClient_HandleDataMessage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client.handleDataMessage(tt.msg)
 
-			if !tt.wantErr && tt.msg["id"] == "test-conn" {
+			if !tt.wantErr && tt.msg["id"] == TestConnID {
 				expectedData, _ := base64.StdEncoding.DecodeString(tt.msg["data"].(string))
 				assert.Equal(t, expectedData, mockConn.writeData)
 			}
@@ -322,8 +321,8 @@ func TestProxyClient_HandleCloseMessage(t *testing.T) {
 
 	// Setup mock connection
 	mockConn := &mockConn{closed: false}
-	client.conns["test-conn"] = mockConn
-	client.msgChans["test-conn"] = make(chan map[string]interface{}, 1)
+	client.conns[TestConnID] = mockConn
+	client.msgChans[TestConnID] = make(chan map[string]interface{}, 1)
 
 	tests := []struct {
 		name string
@@ -332,7 +331,7 @@ func TestProxyClient_HandleCloseMessage(t *testing.T) {
 		{
 			name: "valid close message",
 			msg: map[string]interface{}{
-				"id": "test-conn",
+				"id": TestConnID,
 			},
 		},
 		{
@@ -345,9 +344,9 @@ func TestProxyClient_HandleCloseMessage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			client.handleCloseMessage(tt.msg)
 
-			if tt.msg["id"] == "test-conn" {
+			if tt.msg["id"] == TestConnID {
 				assert.True(t, mockConn.closed)
-				assert.NotContains(t, client.conns, "test-conn")
+				assert.NotContains(t, client.conns, TestConnID)
 			}
 		})
 	}
@@ -361,7 +360,7 @@ func TestProxyClient_SendConnectResponse(t *testing.T) {
 
 	// Test that sendConnectResponse panics when writer is nil (expected behavior)
 	assert.Panics(t, func() {
-		client.sendConnectResponse("test-conn", true, "")
+		_ = client.sendConnectResponse(TestConnID, true, "")
 	})
 }
 
@@ -409,7 +408,7 @@ func (m *mockConn) Read(buf []byte) (int, error) {
 	return n, nil
 }
 
-func (m *mockConn) SetReadDeadline(t time.Time) error {
+func (m *mockConn) SetReadDeadline(_ time.Time) error {
 	return nil
 }
 
@@ -421,42 +420,19 @@ func (m *mockConn) RemoteAddr() net.Addr {
 	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 80}
 }
 
-func (m *mockConn) SetDeadline(t time.Time) error {
+func (m *mockConn) SetDeadline(_ time.Time) error {
 	return nil
 }
 
-func (m *mockConn) SetWriteDeadline(t time.Time) error {
+func (m *mockConn) SetWriteDeadline(_ time.Time) error {
 	return nil
-}
-
-type mockWebSocketWriter struct {
-	messages []interface{}
-	stopped  bool
-	mu       sync.Mutex
-}
-
-func (m *mockWebSocketWriter) WriteJSON(msg interface{}) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.messages = append(m.messages, msg)
-	return nil
-}
-
-func (m *mockWebSocketWriter) Start() {
-	// Mock implementation
-}
-
-func (m *mockWebSocketWriter) Stop() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.stopped = true
 }
 
 // Integration test with mock WebSocket server
 func TestProxyClient_Integration(t *testing.T) {
 	// Create a mock WebSocket server
 	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
+		CheckOrigin: func(_ *http.Request) bool { return true },
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -465,7 +441,11 @@ func TestProxyClient_Integration(t *testing.T) {
 			t.Errorf("Failed to upgrade connection: %v", err)
 			return
 		}
-		defer conn.Close()
+		defer func() {
+			if closeErr := conn.Close(); closeErr != nil {
+				t.Logf("Error closing connection: %v", closeErr)
+			}
+		}()
 
 		// Echo messages back
 		for {
@@ -474,7 +454,10 @@ func TestProxyClient_Integration(t *testing.T) {
 			if err != nil {
 				break
 			}
-			conn.WriteJSON(msg)
+			if writeErr := conn.WriteJSON(msg); writeErr != nil {
+				t.Logf("Error writing JSON: %v", writeErr)
+				break
+			}
 		}
 	}))
 	defer server.Close()
@@ -524,7 +507,7 @@ func TestProxyClient_CreateMessageChannel(t *testing.T) {
 	client, err := NewClient(&config.ClientConfig{})
 	require.NoError(t, err)
 
-	connID := "test-conn"
+	connID := TestConnID
 	client.createMessageChannel(connID)
 
 	client.msgChansMu.RLock()

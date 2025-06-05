@@ -18,7 +18,7 @@ type webSocketConnectionWithInfo struct {
 	conn     *websocket.Conn
 	clientID string
 	groupID  string
-	writer   *WebSocketWriter // 🆕 集成高性能 writer
+	writer   *Writer // 🆕 集成高性能 writer
 	writeBuf chan interface{} // 🆕 异步写入队列
 }
 
@@ -30,7 +30,7 @@ func NewWebSocketConnectionWithInfo(conn *websocket.Conn, clientID, groupID stri
 	writeBuf := make(chan interface{}, writeBufSize)
 
 	// 🆕 创建高性能 writer (完全复制 v1 的实现)
-	writer := NewWebSocketWriter(conn, writeBuf)
+	writer := NewWriter(conn, writeBuf)
 	writer.Start()
 
 	return &webSocketConnectionWithInfo{

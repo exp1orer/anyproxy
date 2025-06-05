@@ -1,3 +1,6 @@
+// Package logger provides structured logging functionality for AnyProxy.
+// It supports multiple output formats (text, JSON) and destinations (stdout, stderr, file)
+// with log rotation capabilities using lumberjack.
 package logger
 
 import (
@@ -48,7 +51,7 @@ func Init(cfg *config.LogConfig) error {
 
 		// Create directory if it doesn't exist
 		dir := filepath.Dir(cfg.File)
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0750); err != nil {
 			return fmt.Errorf("failed to create log directory %s: %v", dir, err)
 		}
 
@@ -76,11 +79,11 @@ func Init(cfg *config.LogConfig) error {
 		}
 	default:
 		// Treat as file path
-		if err := os.MkdirAll(filepath.Dir(cfg.Output), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(cfg.Output), 0750); err != nil {
 			return fmt.Errorf("failed to create log directory: %v", err)
 		}
 
-		file, err := os.OpenFile(cfg.Output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		file, err := os.OpenFile(cfg.Output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err != nil {
 			return fmt.Errorf("failed to open log file %s: %v", cfg.Output, err)
 		}

@@ -10,7 +10,7 @@ import (
 	"golang.org/x/net/proxy"
 )
 
-func TestSOCKS5GroupRouting(t *testing.T) {
+func TestSOCKS5GroupRouting(_ *testing.T) {
 	fmt.Println("Testing SOCKS5 Group-based Routing...")
 
 	// Test cases with different username formats
@@ -83,7 +83,11 @@ func testSOCKS5Connection(username, password string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect through SOCKS5 proxy: %v", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Printf("Error closing SOCKS5 connection: %v\n", err)
+		}
+	}()
 
 	// Send a simple HTTP request to test the connection
 	request := "GET /ip HTTP/1.1\r\nHost: httpbin.org\r\nConnection: close\r\n\r\n"
@@ -93,18 +97,18 @@ func testSOCKS5Connection(username, password string) error {
 	}
 
 	// Read response (just a small part to verify connection)
-	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-	buffer := make([]byte, 1024)
-	n, err := conn.Read(buffer)
+	buf := make([]byte, 1024)
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second)) // Ignore deadline error
+	n, err := conn.Read(buf)
 	if err != nil {
 		return fmt.Errorf("failed to read response: %v", err)
 	}
 
-	fmt.Printf("Response preview: %s\n", string(buffer[:min(n, 200)]))
+	fmt.Printf("Response preview: %s\n", string(buf[:minInt(n, 200)]))
 	return nil
 }
 
-func min(a, b int) int {
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}
@@ -140,7 +144,11 @@ func rawSOCKS5Test(username, password string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to SOCKS5 proxy: %v", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			fmt.Printf("Error closing SOCKS5 connection: %v\n", err)
+		}
+	}()
 
 	// SOCKS5 handshake
 	// Send authentication methods

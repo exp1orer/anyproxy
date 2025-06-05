@@ -5,12 +5,12 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/quic-go/quic-go"
 
+	"github.com/buhuipao/anyproxy/pkg/logger"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
@@ -48,6 +48,7 @@ func (t *quicTransport) ListenAndServe(addr string, handler func(transport.Conne
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		NextProtos:   []string{"anyproxy-quic"},
+		MinVersion:   tls.VersionTLS12, // Enforce minimum TLS 1.2
 	}
 
 	return t.listenAndServe(addr, handler, tlsConfig)
@@ -79,7 +80,7 @@ func (t *quicTransport) listenAndServe(addr string, handler func(transport.Conne
 
 	t.handler = handler
 
-	slog.Info("Starting QUIC server", "listen_addr", addr)
+	logger.Info("Starting QUIC server", "listen_addr", addr)
 
 	// 🚨 修复：配置QUIC心跳和空闲超时，防止连接意外断开
 	quicConfig := &quic.Config{
@@ -90,23 +91,20 @@ func (t *quicTransport) listenAndServe(addr string, handler func(transport.Conne
 	// Create QUIC listener
 	listener, err := quic.ListenAddr(addr, tlsConfig, quicConfig)
 	if err != nil {
-		slog.Error("Failed to create QUIC listener", "addr", addr, "error", err)
+		logger.Error("Failed to create QUIC listener", "addr", addr, "err", err)
 		return fmt.Errorf("failed to listen on %s: %v", addr, err)
 	}
 	t.listener = listener
 
-	slog.Info("QUIC listener created",
-		"addr", addr,
-		"keepalive_period", "30s",
-		"idle_timeout", "5m")
+	logger.Info("QUIC listener created", "addr", addr, "keepalive_period", "30s", "idle_timeout", "5m")
 
 	// Start accepting connections in a goroutine
 	go func() {
-		slog.Info("Starting QUIC server", "addr", addr)
+		logger.Info("Starting QUIC server", "addr", addr)
 		for {
 			conn, err := listener.Accept(context.Background())
 			if err != nil {
-				slog.Error("QUIC server accept error", "error", err)
+				logger.Error("QUIC server accept error", "err", err)
 				return
 			}
 
@@ -116,48 +114,47 @@ func (t *quicTransport) listenAndServe(addr string, handler func(transport.Conne
 	}()
 
 	t.running = true
-	slog.Info("QUIC server started successfully", "addr", addr)
+	logger.Info("QUIC server started successfully", "addr", addr)
 	return nil
 }
 
 // handleConnection handles a new QUIC connection
 func (t *quicTransport) handleConnection(conn quic.Connection) {
-	slog.Debug("New QUIC connection accepted", "remote_addr", conn.RemoteAddr())
+	logger.Debug("New QUIC connection accepted", "remote_addr", conn.RemoteAddr())
 
 	// Accept the first stream
 	stream, err := conn.AcceptStream(context.Background())
 	if err != nil {
-		slog.Error("Failed to accept QUIC stream", "error", err)
-		conn.CloseWithError(0, "failed to accept stream")
+		logger.Error("Failed to accept QUIC stream", "err", err)
+		if err := conn.CloseWithError(0, "failed to accept stream"); err != nil {
+			logger.Debug("Error closing QUIC connection after stream accept failure", "err", err)
+		}
 		return
 	}
 
-	slog.Debug("QUIC stream accepted")
+	logger.Debug("QUIC stream accepted")
 
 	// 🚨 修复：等待并验证认证消息
 	clientID, groupID, err := t.authenticateConnection(stream)
 	if err != nil {
-		slog.Warn("QUIC connection rejected during authentication",
-			"remote_addr", conn.RemoteAddr(),
-			"error", err)
-		conn.CloseWithError(1, "authentication failed")
+		logger.Warn("QUIC connection rejected during authentication", "remote_addr", conn.RemoteAddr(), "err", err)
+		if err := conn.CloseWithError(1, "authentication failed"); err != nil {
+			logger.Debug("Error closing QUIC connection after auth failure", "err", err)
+		}
 		return
 	}
 
-	slog.Info("Client connected via QUIC",
-		"client_id", clientID,
-		"group_id", groupID,
-		"remote_addr", conn.RemoteAddr())
+	logger.Info("Client connected via QUIC", "client_id", clientID, "group_id", groupID, "remote_addr", conn.RemoteAddr())
 
 	// 创建服务端连接
 	quicConn := newQUICServerConnection(stream, conn, clientID, groupID)
 
 	// 调用连接处理器，不使用recover掩盖问题
 	defer func() {
-		quicConn.Close()
-		slog.Info("Client disconnected from QUIC",
-			"client_id", clientID,
-			"group_id", groupID)
+		if err := quicConn.Close(); err != nil {
+			logger.Debug("Error closing QUIC connection", "err", err)
+		}
+		logger.Info("Client disconnected from QUIC", "client_id", clientID, "group_id", groupID)
 	}()
 
 	t.handler(quicConn)
@@ -246,7 +243,7 @@ func (t *quicTransport) authenticateConnection(stream quic.Stream) (clientID, gr
 			return "", "", fmt.Errorf("invalid credentials")
 		}
 
-		slog.Debug("QUIC client authentication successful", "client_id", clientID)
+		logger.Debug("QUIC client authentication successful", "client_id", clientID)
 	}
 
 	// 发送认证成功响应
@@ -260,20 +257,14 @@ func (t *quicTransport) authenticateConnection(stream quic.Stream) (clientID, gr
 		return "", "", fmt.Errorf("failed to send auth response: %v", writeErr)
 	}
 
-	slog.Debug("QUIC authentication completed successfully",
-		"client_id", clientID,
-		"group_id", groupID)
+	logger.Debug("QUIC authentication completed successfully", "client_id", clientID, "group_id", groupID)
 
 	return clientID, groupID, nil
 }
 
 // DialWithConfig implements Transport interface - client connection
 func (t *quicTransport) DialWithConfig(addr string, config *transport.ClientConfig) (transport.Connection, error) {
-	slog.Debug("QUIC transport dialing with config",
-		"addr", addr,
-		"client_id", config.ClientID,
-		"group_id", config.GroupID,
-		"tls_enabled", config.TLSConfig != nil)
+	logger.Debug("QUIC transport dialing with config", "addr", addr, "client_id", config.ClientID, "group_id", config.GroupID, "tls_enabled", config.TLSConfig != nil)
 
 	return t.dialQUICWithConfig(addr, config)
 }
@@ -287,19 +278,19 @@ func (t *quicTransport) Close() error {
 		return nil
 	}
 
-	slog.Info("Stopping QUIC server")
+	logger.Info("Stopping QUIC server")
 
 	if t.listener != nil {
 		err := t.listener.Close()
 		if err != nil {
-			slog.Error("Error closing QUIC listener", "error", err)
+			logger.Error("Error closing QUIC listener", "err", err)
 		} else {
-			slog.Debug("QUIC listener closed")
+			logger.Debug("QUIC listener closed")
 		}
 	}
 
 	t.running = false
-	slog.Info("QUIC server stopped successfully")
+	logger.Info("QUIC server stopped successfully")
 	return nil
 }
 

@@ -1,4 +1,4 @@
-package proxy
+package gateway
 
 import (
 	"context"
@@ -11,21 +11,10 @@ import (
 
 	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/buhuipao/anyproxy/pkg/logger"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
 )
 
-/*
-Port Forwarding Implementation
-
-This implementation uses context-based cancellation for optimal performance and immediate shutdown response.
-
-Implementation Details:
-- TCP: listener.Close() immediately interrupts Accept() calls
-- UDP: packetConn.Close() immediately interrupts ReadFrom() calls
-- Error detection: Check for "use of closed network connection" string
-- Context cancellation: Use context.Context for graceful shutdown coordination
-*/
-
-// PortForwardManager manages port forwarding for clients
+// PortForwardManager 端口转发管理器 (从 v1 完整迁移)
 type PortForwardManager struct {
 	// Map of client ID to their forwarded ports
 	clientPorts map[string]map[int]*PortListener
@@ -37,7 +26,7 @@ type PortForwardManager struct {
 	wg         sync.WaitGroup
 }
 
-// PortListener represents a listening port for forwarding
+// PortListener 端口监听器 (从 v1 完整迁移)
 type PortListener struct {
 	Port       int
 	Protocol   string
@@ -51,8 +40,10 @@ type PortListener struct {
 	cancel     context.CancelFunc
 }
 
-// NewPortForwardManager creates a new port forwarding manager
+// NewPortForwardManager creates a new port forward manager.
 func NewPortForwardManager() *PortForwardManager {
+	logger.Info("Creating new port forwarding manager")
+
 	ctx, cancel := context.WithCancel(context.Background())
 	manager := &PortForwardManager{
 		clientPorts: make(map[string]map[int]*PortListener),
@@ -60,18 +51,20 @@ func NewPortForwardManager() *PortForwardManager {
 		ctx:         ctx,
 		cancel:      cancel,
 	}
-	logger.Info("Port forwarding manager created")
+
+	logger.Debug("Port forwarding manager initialized successfully", "client_ports_capacity", len(manager.clientPorts), "port_owners_capacity", len(manager.portOwners))
+
 	return manager
 }
 
-// OpenPorts opens the requested ports for a client
+// OpenPorts 为客户端开启端口转发 (从 v1 完整迁移)
 func (pm *PortForwardManager) OpenPorts(client *ClientConn, openPorts []config.OpenPort) error {
 	if client == nil {
 		logger.Error("Port opening failed: client cannot be nil")
 		return fmt.Errorf("client cannot be nil")
 	}
 
-	logger.Info("Opening ports", "client", client.ID, "count", len(openPorts))
+	logger.Info("Opening ports for client", "client_id", client.ID, "port_count", len(openPorts))
 
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
@@ -79,7 +72,7 @@ func (pm *PortForwardManager) OpenPorts(client *ClientConn, openPorts []config.O
 	// Check if manager is shutting down
 	select {
 	case <-pm.ctx.Done():
-		logger.Warn("Port opening rejected: manager shutting down", "client", client.ID)
+		logger.Warn("Port opening rejected: manager is shutting down", "client_id", client.ID)
 		return fmt.Errorf("port forward manager is shutting down")
 	default:
 	}
@@ -87,28 +80,40 @@ func (pm *PortForwardManager) OpenPorts(client *ClientConn, openPorts []config.O
 	// Initialize client ports map if it doesn't exist
 	if pm.clientPorts[client.ID] == nil {
 		pm.clientPorts[client.ID] = make(map[int]*PortListener)
+		logger.Debug("Initialized port map for new client", "client_id", client.ID)
 	}
 
 	var errors []error
 	successfulPorts := []*PortListener{}
+	conflictPorts := []int{}
+	duplicatePorts := []int{}
+
+	// Log details of each port request
+	for i, openPort := range openPorts {
+		logger.Debug("Processing port request", "client_id", client.ID, "port_index", i, "remote_port", openPort.RemotePort, "local_host", openPort.LocalHost, "local_port", openPort.LocalPort, "protocol", openPort.Protocol)
+	}
 
 	for _, openPort := range openPorts {
 		// Check if port is already in use
 		if existingClientID, exists := pm.portOwners[openPort.RemotePort]; exists {
 			if existingClientID != client.ID {
-				logger.Warn("Port conflict", "client", client.ID, "port", openPort.RemotePort, "owner", existingClientID)
+				conflictPorts = append(conflictPorts, openPort.RemotePort)
+				logger.Warn("Port conflict detected", "client_id", client.ID, "port", openPort.RemotePort, "existing_owner", existingClientID)
 				errors = append(errors, fmt.Errorf("port %d already in use by client %s", openPort.RemotePort, existingClientID))
 				continue
 			}
 			// Same client requesting same port - skip
-			logger.Debug("Port already opened", "port", openPort.RemotePort, "client", client.ID)
+			duplicatePorts = append(duplicatePorts, openPort.RemotePort)
+			logger.Info("Port already opened by same client", "port", openPort.RemotePort, "client_id", client.ID)
 			continue
 		}
 
 		// Create port listener
+		logger.Debug("Creating port listener", "client_id", client.ID, "port", openPort.RemotePort, "protocol", openPort.Protocol)
+
 		portListener, err := pm.createPortListener(client, openPort)
 		if err != nil {
-			logger.Error("Failed to create port listener", "client", client.ID, "port", openPort.RemotePort, "err", err)
+			logger.Error("Failed to create port listener", "client_id", client.ID, "port", openPort.RemotePort, "protocol", openPort.Protocol, "err", err)
 			errors = append(errors, fmt.Errorf("failed to open port %d: %v", openPort.RemotePort, err))
 			continue
 		}
@@ -118,11 +123,15 @@ func (pm *PortForwardManager) OpenPorts(client *ClientConn, openPorts []config.O
 		pm.portOwners[openPort.RemotePort] = client.ID
 		successfulPorts = append(successfulPorts, portListener)
 
-		logger.Info("Port forwarding created", "client", client.ID, "port", openPort.RemotePort, "target", fmt.Sprintf("%s:%d", openPort.LocalHost, openPort.LocalPort))
+		logger.Info("Port forwarding created successfully", "client_id", client.ID, "remote_port", openPort.RemotePort, "local_host", openPort.LocalHost, "local_port", openPort.LocalPort, "protocol", openPort.Protocol)
 	}
 
 	// Start listening on successful ports
-	for _, portListener := range successfulPorts {
+	logger.Debug("Starting listeners for successful ports", "client_id", client.ID, "successful_count", len(successfulPorts))
+
+	for i, portListener := range successfulPorts {
+		logger.Debug("Starting port listener", "client_id", client.ID, "port", portListener.Port, "listener_index", i)
+
 		pm.wg.Add(1)
 		go func(pl *PortListener) {
 			defer pm.wg.Done()
@@ -132,19 +141,22 @@ func (pm *PortForwardManager) OpenPorts(client *ClientConn, openPorts []config.O
 
 	// If we have any errors, return them
 	if len(errors) > 0 {
-		logger.Error("Port opening failed", "client", client.ID, "errors", len(errors))
+		logger.Error("Port opening completed with errors", "client_id", client.ID, "requested_ports", len(openPorts), "successful_ports", len(successfulPorts), "error_count", len(errors), "conflict_ports", conflictPorts, "duplicate_ports", duplicatePorts)
 		return fmt.Errorf("failed to open some ports: %v", errors)
 	}
 
-	logger.Info("All ports opened", "client", client.ID, "count", len(successfulPorts))
+	logger.Info("All ports opened successfully", "client_id", client.ID, "successful_ports", len(successfulPorts), "duplicate_ports", len(duplicatePorts), "total_requested", len(openPorts))
+
 	return nil
 }
 
-// createPortListener creates a new port listener
+// createPortListener 创建端口监听器 (从 v1 完整迁移)
 func (pm *PortForwardManager) createPortListener(client *ClientConn, openPort config.OpenPort) (*PortListener, error) {
+	logger.Debug("Creating port listener", "client_id", client.ID, "port", openPort.RemotePort, "protocol", openPort.Protocol, "local_target", fmt.Sprintf("%s:%d", openPort.LocalHost, openPort.LocalPort))
+
 	// Support both TCP and UDP
-	if openPort.Protocol != ProtocolTCP && openPort.Protocol != ProtocolUDP {
-		logger.Error("Unsupported protocol", "client", client.ID, "port", openPort.RemotePort, "protocol", openPort.Protocol)
+	if openPort.Protocol != common.ProtocolTCP && openPort.Protocol != common.ProtocolUDP {
+		logger.Error("Unsupported protocol for port forwarding", "client_id", client.ID, "port", openPort.RemotePort, "protocol", openPort.Protocol, "supported_protocols", []string{common.ProtocolTCP, common.ProtocolUDP})
 		return nil, fmt.Errorf("protocol %s not supported, only TCP and UDP are supported", openPort.Protocol)
 	}
 
@@ -161,56 +173,71 @@ func (pm *PortForwardManager) createPortListener(client *ClientConn, openPort co
 		cancel:    cancel,
 	}
 
-	if openPort.Protocol == ProtocolTCP {
+	logger.Debug("Port listener structure created", "client_id", client.ID, "port", openPort.RemotePort, "bind_addr", addr)
+
+	if openPort.Protocol == common.ProtocolTCP {
 		// Create TCP listener
-		listener, err := net.Listen(ProtocolTCP, addr)
+		logger.Debug("Creating TCP listener", "client_id", client.ID, "port", openPort.RemotePort, "bind_addr", addr)
+
+		listener, err := net.Listen(common.ProtocolTCP, addr)
 		if err != nil {
-			logger.Error("Failed to create TCP listener", "client", client.ID, "port", openPort.RemotePort, "err", err)
+			logger.Error("Failed to create TCP listener", "client_id", client.ID, "port", openPort.RemotePort, "bind_addr", addr, "err", err)
 			cancel()
 			return nil, fmt.Errorf("failed to listen on TCP port %d: %v", openPort.RemotePort, err)
 		}
 		portListener.Listener = listener
+
+		logger.Debug("TCP listener created successfully", "client_id", client.ID, "port", openPort.RemotePort, "local_addr", listener.Addr())
 	} else { // UDP
 		// Create UDP listener
+		logger.Debug("Creating UDP packet connection", "client_id", client.ID, "port", openPort.RemotePort, "bind_addr", addr)
+
 		packetConn, err := net.ListenPacket("udp", addr)
 		if err != nil {
-			logger.Error("Failed to create UDP listener", "client", client.ID, "port", openPort.RemotePort, "err", err)
+			logger.Error("Failed to create UDP packet connection", "client_id", client.ID, "port", openPort.RemotePort, "bind_addr", addr, "err", err)
 			cancel()
 			return nil, fmt.Errorf("failed to listen on UDP port %d: %v", openPort.RemotePort, err)
 		}
 		portListener.PacketConn = packetConn
+
+		logger.Debug("UDP packet connection created successfully", "client_id", client.ID, "port", openPort.RemotePort, "local_addr", packetConn.LocalAddr())
 	}
+
+	logger.Debug("Port listener created successfully", "client_id", client.ID, "port", openPort.RemotePort, "protocol", openPort.Protocol, "local_target", fmt.Sprintf("%s:%d", openPort.LocalHost, openPort.LocalPort))
 
 	return portListener, nil
 }
 
-// handlePortListener handles incoming connections on a forwarded port
+// handlePortListener 处理端口监听器 (从 v1 完整迁移)
 func (pm *PortForwardManager) handlePortListener(portListener *PortListener) {
 	defer func() {
 		// Cancel the port listener context
 		portListener.cancel()
 
 		// Close the appropriate connection based on protocol
-		if portListener.Protocol == ProtocolTCP && portListener.Listener != nil {
-			portListener.Listener.Close()
+		if portListener.Protocol == common.ProtocolTCP && portListener.Listener != nil {
+			if err := portListener.Listener.Close(); err != nil {
+				logger.Debug("Error closing TCP listener", "port", portListener.Port, "err", err)
+			}
 		} else if portListener.PacketConn != nil {
-			portListener.PacketConn.Close()
+			if err := portListener.PacketConn.Close(); err != nil {
+				logger.Debug("Error closing UDP packet connection", "port", portListener.Port, "err", err)
+			}
 		}
 
-		logger.Info("Port listener stopped", "port", portListener.Port, "client", portListener.ClientID)
+		logger.Info("Port listener stopped", "port", portListener.Port, "client_id", portListener.ClientID)
 	}()
 
-	logger.Info("Port forwarding started", "port", portListener.Port, "protocol", portListener.Protocol, "client", portListener.ClientID, "target", net.JoinHostPort(portListener.LocalHost, strconv.Itoa(portListener.LocalPort)))
+	logger.Info("Started listening for port forwarding", "port", portListener.Port, "protocol", portListener.Protocol, "client_id", portListener.ClientID, "local_target", net.JoinHostPort(portListener.LocalHost, strconv.Itoa(portListener.LocalPort)))
 
-	if portListener.Protocol == ProtocolTCP {
+	if portListener.Protocol == common.ProtocolTCP {
 		pm.handleTCPPortListener(portListener)
 	} else {
 		pm.handleUDPPortListener(portListener)
 	}
 }
 
-// handleTCPPortListener handles incoming connections on a forwarded TCP port
-// Uses context for cancellation and direct listener closure for optimal performance
+// handleTCPPortListener 处理 TCP 端口监听 (从 v1 完整迁移)
 func (pm *PortForwardManager) handleTCPPortListener(portListener *PortListener) {
 	// Create channels for async operations
 	connCh := make(chan net.Conn, 1)
@@ -234,7 +261,9 @@ func (pm *PortForwardManager) handleTCPPortListener(portListener *PortListener) 
 			select {
 			case connCh <- conn:
 			case <-portListener.ctx.Done():
-				conn.Close()
+				if err := conn.Close(); err != nil {
+					logger.Debug("Error closing connection on context cancellation", "err", err)
+				}
 				return
 			}
 		}
@@ -260,16 +289,16 @@ func (pm *PortForwardManager) handleTCPPortListener(portListener *PortListener) 
 			}
 			// Check if the error is due to listener being closed (normal shutdown)
 			if strings.Contains(err.Error(), "use of closed network connection") {
+				logger.Debug("Port listener closed", "port", portListener.Port)
 				return
 			}
-			logger.Error("Error accepting connection", "port", portListener.Port, "err", err)
+			logger.Error("Error accepting connection on forwarded port", "port", portListener.Port, "err", err)
 			return
 		}
 	}
 }
 
-// handleUDPPortListener handles incoming connections on a forwarded UDP port
-// Uses context for cancellation and direct connection closure for optimal performance
+// handleUDPPortListener 处理 UDP 端口监听 (从 v1 完整迁移)
 func (pm *PortForwardManager) handleUDPPortListener(portListener *PortListener) {
 	buffer := make([]byte, 65536) // Maximum UDP packet size
 
@@ -328,20 +357,21 @@ func (pm *PortForwardManager) handleUDPPortListener(portListener *PortListener) 
 			}
 			// Check if the error is due to connection being closed (normal shutdown)
 			if strings.Contains(err.Error(), "use of closed network connection") {
+				logger.Debug("UDP port listener closed", "port", portListener.Port)
 				return
 			}
-			logger.Error("Error reading UDP packet", "port", portListener.Port, "err", err)
+			logger.Error("Error reading UDP packet on forwarded port", "port", portListener.Port, "err", err)
 			return
 		}
 	}
 }
 
-// handleUDPPacket handles a single UDP packet
+// handleUDPPacket 处理单个 UDP 数据包 (从 v1 完整迁移)
 func (pm *PortForwardManager) handleUDPPacket(portListener *PortListener, data []byte, clientAddr net.Addr) {
 	// Create target address
 	targetAddr := net.JoinHostPort(portListener.LocalHost, strconv.Itoa(portListener.LocalPort))
 
-	logger.Debug("UDP packet", "port", portListener.Port, "client", portListener.ClientID, "target", targetAddr, "size", len(data))
+	logger.Debug("New UDP packet to forwarded port", "port", portListener.Port, "client_id", portListener.ClientID, "target", targetAddr, "client_addr", clientAddr, "data_size", len(data))
 
 	// Create UDP connection to target with context
 	ctx, cancel := context.WithTimeout(portListener.ctx, 30*time.Second)
@@ -350,52 +380,70 @@ func (pm *PortForwardManager) handleUDPPacket(portListener *PortListener, data [
 	var d net.Dialer
 	targetConn, err := d.DialContext(ctx, "udp", targetAddr)
 	if err != nil {
-		logger.Error("Failed to create UDP connection", "port", portListener.Port, "client", portListener.ClientID, "target", targetAddr, "err", err)
+		logger.Error("Failed to create UDP connection to target", "port", portListener.Port, "client_id", portListener.ClientID, "target", targetAddr, "err", err)
 		return
 	}
-	defer targetConn.Close()
+	defer func() {
+		if err := targetConn.Close(); err != nil {
+			logger.Debug("Error closing UDP target connection", "err", err)
+		}
+	}()
 
 	// Send data to target
 	_, err = targetConn.Write(data)
 	if err != nil {
-		logger.Error("Failed to send UDP data", "port", portListener.Port, "err", err)
+		logger.Error("Failed to send UDP data to target", "port", portListener.Port, "client_id", portListener.ClientID, "target", targetAddr, "err", err)
 		return
 	}
 
-	// Read response from target with context deadline
+	// Set read timeout for response
+	targetConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+
+	// Read response from target
 	responseBuffer := make([]byte, 65536)
 	n, err := targetConn.Read(responseBuffer)
 	if err != nil {
-		// Timeout or other error - UDP is connectionless, so this might be expected
+		// UDP often doesn't send responses, so this is not necessarily an error
+		logger.Debug("No response from UDP target", "port", portListener.Port, "err", err)
 		return
 	}
 
 	// Send response back to client
 	_, err = portListener.PacketConn.WriteTo(responseBuffer[:n], clientAddr)
 	if err != nil {
-		logger.Error("Failed to send UDP response", "port", portListener.Port, "err", err)
+		logger.Error("Failed to send UDP response to client", "port", portListener.Port, "client_addr", clientAddr, "err", err)
 		return
 	}
 
-	logger.Debug("UDP forwarded", "port", portListener.Port, "resp_size", n)
+	logger.Debug("UDP packet forwarded successfully", "port", portListener.Port, "client_addr", clientAddr, "target", targetAddr, "request_size", len(data), "response_size", n)
 }
 
-// handleForwardedConnection handles a connection to a forwarded port
+// handleForwardedConnection 处理转发的连接 (从 v1 完整迁移)
 func (pm *PortForwardManager) handleForwardedConnection(portListener *PortListener, incomingConn net.Conn) {
-	defer incomingConn.Close()
+	defer func() {
+		if err := incomingConn.Close(); err != nil {
+			logger.Debug("Error closing incoming connection", "err", err)
+		}
+	}()
 
 	// Create target address
 	targetAddr := net.JoinHostPort(portListener.LocalHost, strconv.Itoa(portListener.LocalPort))
 
-	logger.Info("New connection", "port", portListener.Port, "client", portListener.ClientID, "target", targetAddr, "from", incomingConn.RemoteAddr())
+	logger.Info("🔄 PORT FORWARDING - New incoming connection", "port", portListener.Port, "client_id", portListener.ClientID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr(), "action", "Forwarding connection to target")
 
 	// Use the client's dialNetwork method to create connection - this reuses existing logic
-	clientConn, err := portListener.Client.dialNetwork(ProtocolTCP, targetAddr)
+	clientConn, err := portListener.Client.dialNetwork(common.ProtocolTCP, targetAddr)
 	if err != nil {
-		logger.Error("Failed to connect", "port", portListener.Port, "client", portListener.ClientID, "target", targetAddr, "err", err)
+		logger.Error("❌ PORT FORWARDING FAILED", "port", portListener.Port, "client_id", portListener.ClientID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr(), "err", err, "action", "Failed to establish connection to target")
 		return
 	}
-	defer clientConn.Close()
+
+	logger.Info("✅ PORT FORWARDING - Connection established", "port", portListener.Port, "client_id", portListener.ClientID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr(), "action", "Successfully connected to target")
+	defer func() {
+		if err := clientConn.Close(); err != nil {
+			logger.Debug("Error closing client connection", "err", err)
+		}
+	}()
 
 	// Create context for the connection with timeout
 	ctx, cancel := context.WithTimeout(portListener.ctx, 30*time.Minute)
@@ -405,7 +453,7 @@ func (pm *PortForwardManager) handleForwardedConnection(portListener *PortListen
 	pm.transferData(ctx, incomingConn, clientConn, portListener.Port)
 }
 
-// transferData handles bidirectional data transfer with context awareness
+// transferData 处理双向数据传输 (从 v1 完整迁移)
 func (pm *PortForwardManager) transferData(ctx context.Context, conn1, conn2 net.Conn, port int) {
 	var wg sync.WaitGroup
 
@@ -432,13 +480,13 @@ func (pm *PortForwardManager) transferData(ctx context.Context, conn1, conn2 net
 
 	select {
 	case <-done:
-		// Normal completion
+		logger.Debug("Port forwarding connection finished", "port", port)
 	case <-ctx.Done():
-		// Context cancelled
+		logger.Debug("Port forwarding connection cancelled", "port", port)
 	}
 }
 
-// copyDataWithContext copies data between connections with context awareness
+// copyDataWithContext 在连接间复制数据 (从 v1 完整迁移)
 func (pm *PortForwardManager) copyDataWithContext(ctx context.Context, dst, src net.Conn, direction string, port int) {
 	buffer := make([]byte, 32*1024) // 32KB buffer to match other components
 	totalBytes := int64(0)
@@ -447,15 +495,20 @@ func (pm *PortForwardManager) copyDataWithContext(ctx context.Context, dst, src 
 		// Check context before each operation
 		select {
 		case <-ctx.Done():
+			logger.Debug("Data copy cancelled by context", "direction", direction, "port", port, "transferred_bytes", totalBytes)
 			return
 		default:
 		}
 
 		// Set read timeout based on context
 		if deadline, ok := ctx.Deadline(); ok {
-			src.SetReadDeadline(deadline)
+			if err := src.SetReadDeadline(deadline); err != nil {
+				logger.Debug("Failed to set read deadline", "err", err)
+			}
 		} else {
-			src.SetReadDeadline(time.Now().Add(30 * time.Second))
+			if err := src.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
+				logger.Debug("Failed to set read deadline", "err", err)
+			}
 		}
 
 		n, err := src.Read(buffer)
@@ -464,29 +517,32 @@ func (pm *PortForwardManager) copyDataWithContext(ctx context.Context, dst, src 
 
 			// Set write timeout based on context
 			if deadline, ok := ctx.Deadline(); ok {
-				dst.SetWriteDeadline(deadline)
+				if err := dst.SetWriteDeadline(deadline); err != nil {
+					logger.Debug("Failed to set write deadline", "err", err)
+				}
 			} else {
-				dst.SetWriteDeadline(time.Now().Add(30 * time.Second))
+				if err := dst.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil {
+					logger.Debug("Failed to set write deadline", "err", err)
+				}
 			}
 
 			_, writeErr := dst.Write(buffer[:n])
 			if writeErr != nil {
-				logger.Error("Port forward write error", "dir", direction, "port", port, "err", writeErr, "bytes", totalBytes)
+				logger.Error("Port forward write error", "direction", direction, "port", port, "err", writeErr, "transferred_bytes", totalBytes)
 				return
 			}
 		}
 
 		if err != nil {
 			if err != net.ErrClosed {
-				logger.Debug("Port forward closed", "dir", direction, "port", port, "err", err, "bytes", totalBytes)
+				logger.Debug("Port forward connection closed", "direction", direction, "port", port, "err", err, "transferred_bytes", totalBytes)
 			}
 			return
 		}
 	}
 }
 
-// CloseClientPorts closes all ports for a specific client
-// Uses context cancellation for immediate shutdown
+// CloseClientPorts 关闭客户端的所有端口 (从 v1 完整迁移)
 func (pm *PortForwardManager) CloseClientPorts(clientID string) {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
@@ -513,22 +569,22 @@ func (pm *PortForwardManager) CloseClientPorts(clientID string) {
 	delete(pm.clientPorts, clientID)
 }
 
-// Stop stops the port forwarding manager
-// Uses context cancellation for immediate shutdown of all ports
+// Stop stops the port forward manager and cleans up all resources.
 func (pm *PortForwardManager) Stop() {
 	logger.Info("Stopping port forwarding manager")
 
-	pm.mutex.Lock()
-	defer pm.mutex.Unlock()
-
-	// Cancel the main context - this will cascade to all port listeners
+	// Cancel the context to stop all port listeners
 	pm.cancel()
 
-	// Clear all data structures
-	pm.clientPorts = make(map[string]map[int]*PortListener)
-	pm.portOwners = make(map[int]string)
+	// Get count of active ports for logging
+	pm.mutex.RLock()
+	totalPorts := len(pm.portOwners)
+	totalClients := len(pm.clientPorts)
+	pm.mutex.RUnlock()
 
-	// Wait for all goroutines to finish with timeout
+	logger.Debug("Waiting for all port forwarding operations to complete", "total_ports", totalPorts, "total_clients", totalClients)
+
+	// Wait for all goroutines to finish
 	done := make(chan struct{})
 	go func() {
 		pm.wg.Wait()
@@ -537,15 +593,21 @@ func (pm *PortForwardManager) Stop() {
 
 	select {
 	case <-done:
-		logger.Info("All port forwarding goroutines finished gracefully")
+		logger.Debug("All port forwarding goroutines finished gracefully")
 	case <-time.After(5 * time.Second):
 		logger.Warn("Timeout waiting for port forwarding goroutines to finish")
 	}
 
-	logger.Info("Port forwarding manager stopped")
+	// Clear all data structures
+	pm.mutex.Lock()
+	pm.clientPorts = make(map[string]map[int]*PortListener)
+	pm.portOwners = make(map[int]string)
+	pm.mutex.Unlock()
+
+	logger.Info("Port forwarding manager stopped", "ports_closed", totalPorts, "clients_affected", totalClients)
 }
 
-// GetClientPorts returns the ports currently opened by a client
+// GetClientPorts 获取客户端的端口列表 (从 v1 完整迁移)
 func (pm *PortForwardManager) GetClientPorts(clientID string) []int {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()

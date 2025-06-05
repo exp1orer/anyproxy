@@ -1,8 +1,9 @@
+// Package main implements the AnyProxy gateway server application.
+// This is the v1 gateway that accepts client connections and handles proxy traffic.
 package main
 
 import (
 	"flag"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -20,20 +21,20 @@ func main() {
 	// Load configuration
 	cfg, err := config.LoadConfig(*configFile)
 	if err != nil {
-		slog.Error("Failed to load configuration", "error", err)
+		logger.Error("Failed to load configuration", "err", err)
 		os.Exit(1)
 	}
 
 	// Initialize logger
 	if err := logger.Init(&cfg.Log); err != nil {
-		slog.Error("Failed to initialize logger", "error", err)
+		logger.Error("Failed to initialize logger", "err", err)
 		os.Exit(1)
 	}
 
 	// Create and start gateway
 	gateway, err := proxy.NewGateway(cfg)
 	if err != nil {
-		slog.Error("Failed to create gateway", "error", err)
+		logger.Error("Failed to create gateway", "err", err)
 		os.Exit(1)
 	}
 
@@ -44,21 +45,21 @@ func main() {
 	// Start gateway in a separate goroutine
 	go func() {
 		if err := gateway.Start(); err != nil {
-			slog.Error("Gateway failed", "error", err)
+			logger.Error("Gateway failed", "err", err)
 			os.Exit(1)
 		}
 	}()
 
-	slog.Info("Gateway started", "listen_addr", cfg.Gateway.ListenAddr)
+	logger.Info("Gateway started", "listen_addr", cfg.Gateway.ListenAddr)
 
 	// Wait for termination signal
 	<-sigCh
-	slog.Info("Shutting down...")
+	logger.Info("Shutting down...")
 
 	// Stop gateway
 	if err := gateway.Stop(); err != nil {
-		slog.Error("Error shutting down gateway", "error", err)
+		logger.Error("Error shutting down gateway", "err", err)
 	}
 
-	slog.Info("Gateway stopped")
+	logger.Info("Gateway stopped")
 }

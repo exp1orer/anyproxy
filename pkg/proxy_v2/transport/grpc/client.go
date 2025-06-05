@@ -1,9 +1,9 @@
+// Package grpc provides gRPC transport implementation for AnyProxy v2.
 package grpc
 
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"google.golang.org/grpc"
@@ -12,14 +12,13 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 
+	"github.com/buhuipao/anyproxy/pkg/logger"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
 // dialGRPCWithConfig connects to gRPC server with configuration
 func (t *grpcTransport) dialGRPCWithConfig(addr string, config *transport.ClientConfig) (transport.Connection, error) {
-	slog.Debug("Establishing gRPC connection to gateway",
-		"client_id", config.ClientID,
-		"gateway_addr", addr)
+	logger.Debug("Establishing gRPC connection to gateway", "client_id", config.ClientID, "gateway_addr", addr)
 
 	// Set up connection options
 	var opts []grpc.DialOption
@@ -35,33 +34,22 @@ func (t *grpcTransport) dialGRPCWithConfig(addr string, config *transport.Client
 	if config.TLSConfig != nil {
 		creds := credentials.NewTLS(config.TLSConfig)
 		opts = append(opts, grpc.WithTransportCredentials(creds))
-		slog.Debug("gRPC TLS configured", "client_id", config.ClientID)
+		logger.Debug("gRPC TLS configured", "client_id", config.ClientID)
 	} else {
 		opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		slog.Debug("gRPC using insecure connection", "client_id", config.ClientID)
+		logger.Debug("gRPC using insecure connection", "client_id", config.ClientID)
 	}
 
-	// Set connection timeout
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	logger.Info("Connecting to gRPC endpoint", "client_id", config.ClientID, "addr", addr, "keepalive_time", "30s", "keepalive_timeout", "5s")
 
-	slog.Info("Connecting to gRPC endpoint",
-		"client_id", config.ClientID,
-		"addr", addr,
-		"keepalive_time", "30s",
-		"keepalive_timeout", "5s")
-
-	// Establish gRPC connection
-	conn, err := grpc.DialContext(ctx, addr, opts...)
+	// Establish gRPC connection using NewClient (updated API)
+	conn, err := grpc.NewClient(addr, opts...)
 	if err != nil {
-		slog.Error("Failed to connect to gRPC server",
-			"client_id", config.ClientID,
-			"addr", addr,
-			"error", err)
-		return nil, fmt.Errorf("failed to connect to gRPC server: %v", err)
+		logger.Error("Failed to create gRPC client", "client_id", config.ClientID, "addr", addr, "err", err)
+		return nil, fmt.Errorf("failed to create gRPC client: %v", err)
 	}
 
-	slog.Debug("gRPC connection established", "client_id", config.ClientID)
+	logger.Debug("gRPC connection established", "client_id", config.ClientID)
 
 	// Create gRPC client
 	client := NewTransportServiceClient(conn)
@@ -80,15 +68,14 @@ func (t *grpcTransport) dialGRPCWithConfig(addr string, config *transport.Client
 	// Create bidirectional stream
 	stream, err := client.BiStream(streamCtx)
 	if err != nil {
-		conn.Close()
-		slog.Error("Failed to create gRPC stream",
-			"client_id", config.ClientID,
-			"error", err)
+		if closeErr := conn.Close(); closeErr != nil {
+			logger.Debug("Error closing gRPC connection after stream failure", "err", closeErr)
+		}
+		logger.Error("Failed to create gRPC stream", "client_id", config.ClientID, "err", err)
 		return nil, fmt.Errorf("failed to create gRPC stream: %v", err)
 	}
 
-	slog.Info("gRPC stream established successfully",
-		"client_id", config.ClientID)
+	logger.Info("gRPC stream established successfully", "client_id", config.ClientID)
 
 	// Create and return connection wrapper
 	grpcConn := newGRPCConnection(stream, conn, config.ClientID, config.GroupID)

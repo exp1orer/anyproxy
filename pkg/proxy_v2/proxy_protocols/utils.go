@@ -1,4 +1,4 @@
-package proxy_protocols
+package proxy_protocols // nolint:revive // Package name intentionally uses underscore to avoid conflict with main proxy package
 
 import "strings"
 

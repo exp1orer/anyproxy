@@ -187,7 +187,7 @@ gateway:
 			tmpDir := t.TempDir()
 			configFile := filepath.Join(tmpDir, "config.yaml")
 
-			err := os.WriteFile(configFile, []byte(tt.configYAML), 0644)
+			err := os.WriteFile(configFile, []byte(tt.configYAML), 0600)
 			require.NoError(t, err)
 
 			// Test LoadConfig
@@ -264,7 +264,7 @@ log:
   format: "json"
 `
 
-	err := os.WriteFile(configFile, []byte(configYAML), 0644)
+	err := os.WriteFile(configFile, []byte(configYAML), 0600)
 	require.NoError(t, err)
 
 	loadedCfg, err := LoadConfig(configFile)
@@ -288,7 +288,7 @@ gateway:
 `
 
 	newConfigFile := filepath.Join(tmpDir, "new_config.yaml")
-	err = os.WriteFile(newConfigFile, []byte(newConfigYAML), 0644)
+	err = os.WriteFile(newConfigFile, []byte(newConfigYAML), 0600)
 	require.NoError(t, err)
 
 	newLoadedCfg, err := LoadConfig(newConfigFile)
@@ -413,7 +413,7 @@ log:
 	tmpDir := t.TempDir()
 	configFile := filepath.Join(tmpDir, "test_config.yaml")
 
-	err := os.WriteFile(configFile, []byte(configYAML), 0644)
+	err := os.WriteFile(configFile, []byte(configYAML), 0600)
 	require.NoError(t, err)
 
 	cfg, err := LoadConfig(configFile)
@@ -467,7 +467,7 @@ log:
   level: "info"
 `
 
-	err := os.WriteFile(configFile, []byte(configYAML), 0644)
+	err := os.WriteFile(configFile, []byte(configYAML), 0600)
 	require.NoError(t, err)
 
 	_, err = LoadConfig(configFile)

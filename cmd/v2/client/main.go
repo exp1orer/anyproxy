@@ -1,8 +1,9 @@
+// Package main implements the AnyProxy v2 client application.
+// This is the v2 client with multi-transport support (WebSocket, gRPC, QUIC).
 package main
 
 import (
 	"flag"
-	"log/slog"
 	"os"
 	"os/signal"
 	"sync"
@@ -10,7 +11,7 @@ import (
 
 	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/buhuipao/anyproxy/pkg/logger"
-	proxy_v2 "github.com/buhuipao/anyproxy/pkg/proxy_v2"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/client"
 )
 
 func main() {
@@ -21,34 +22,34 @@ func main() {
 	// Load configuration
 	cfg, err := config.LoadConfig(*configFile)
 	if err != nil {
-		slog.Error("Failed to load configuration", "error", err)
+		logger.Error("Failed to load configuration", "err", err)
 		os.Exit(1)
 	}
 
 	// Initialize logger
 	if err := logger.Init(&cfg.Log); err != nil {
-		slog.Error("Failed to initialize logger", "error", err)
+		logger.Error("Failed to initialize logger", "err", err)
 		os.Exit(1)
 	}
 
-	var clients []*proxy_v2.Client
+	var clients []*client.Client
 	for i := 0; i < cfg.Client.Replicas; i++ {
 		// Create and start client (使用 WebSocket 传输层)
-		proxyClient, err := proxy_v2.NewClient(&cfg.Client, cfg.Transport.Type)
+		proxyClient, err := client.NewClient(&cfg.Client, cfg.Transport.Type)
 		if err != nil {
-			slog.Error("Failed to create client", "error", err)
+			logger.Error("Failed to create client", "err", err)
 			os.Exit(1)
 		}
 
 		// Start client (non-blocking)
 		if err := proxyClient.Start(); err != nil {
-			slog.Error("Failed to start client", "error", err)
+			logger.Error("Failed to start client", "err", err)
 			os.Exit(1)
 		}
 
 		clients = append(clients, proxyClient)
 	}
-	slog.Info("Started clients", "count", cfg.Client.Replicas, "gateway_addr", cfg.Client.GatewayAddr)
+	logger.Info("Started clients", "count", cfg.Client.Replicas, "gateway_addr", cfg.Client.GatewayAddr)
 
 	// Handle signals for graceful shutdown
 	sigCh := make(chan os.Signal, 1)
@@ -56,21 +57,21 @@ func main() {
 
 	// Wait for termination signal
 	<-sigCh
-	slog.Info("Shutting down...")
+	logger.Info("Shutting down...")
 
 	// Stop all clients concurrently
 	var stopWg sync.WaitGroup
 	for _, proxyClient := range clients {
 		stopWg.Add(1)
-		go func(c *proxy_v2.Client) {
+		go func(c *client.Client) {
 			defer stopWg.Done()
 			if err := c.Stop(); err != nil {
-				slog.Error("Error shutting down client", "error", err)
+				logger.Error("Error shutting down client", "err", err)
 			}
 		}(proxyClient)
 	}
 
 	// Wait for all clients to stop
 	stopWg.Wait()
-	slog.Info("All clients stopped")
+	logger.Info("All clients stopped")
 }

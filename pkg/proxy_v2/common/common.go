@@ -1,3 +1,4 @@
+// Package common provides shared utilities for AnyProxy v2.
 package common
 
 // The following type definitions need to be migrated or redefined from elsewhere

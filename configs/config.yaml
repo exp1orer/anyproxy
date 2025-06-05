@@ -34,14 +34,14 @@ client:
   gateway_addr: "127.0.0.1:8443"
   gateway_tls_cert: "certs/server.crt"
   client_id: "client"
-  group_id: "example-group"
-  replicas: 1
+  # group_id: "example-group"
+  replicas: 10
   auth_username: "gateway_user"
   auth_password: "gateway_password"
   forbidden_hosts:
     - "0.0.0.0"
-    - "127.0.0.1"
-    - "localhost"
+    # - "127.0.0.1"  # Commented out to allow port forwarding to local services
+    # - "localhost"  # Commented out to allow port forwarding to local services
     - "192.168.1.1"
     - "internal.example.com"
   allowed_hosts:
@@ -53,7 +53,7 @@ client:
     - remote_port: 8000
       protocol: "tcp"
       local_port: 3000
-      local_host: "10.23.190.125"
+      local_host: "127.0.0.1"
     - remote_port: 8022
       protocol: "udp"
       local_port: 22

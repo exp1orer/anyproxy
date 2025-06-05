@@ -26,11 +26,12 @@ func NewConnWrapper(conn net.Conn, network, remoteAddress string) *ConnWrapper {
 	var remoteAddr net.Addr
 	if host, port, err := net.SplitHostPort(remoteAddress); err == nil {
 		if ip := net.ParseIP(host); ip != nil {
-			if network == "tcp" {
+			switch network {
+			case "tcp":
 				if portNum, err := net.LookupPort("tcp", port); err == nil {
 					remoteAddr = &net.TCPAddr{IP: ip, Port: portNum}
 				}
-			} else if network == "udp" {
+			case "udp":
 				if portNum, err := net.LookupPort("udp", port); err == nil {
 					remoteAddr = &net.UDPAddr{IP: ip, Port: portNum}
 				}

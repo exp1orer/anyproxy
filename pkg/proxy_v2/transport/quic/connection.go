@@ -11,6 +11,7 @@ import (
 
 	"github.com/quic-go/quic-go"
 
+	"github.com/buhuipao/anyproxy/pkg/logger"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
@@ -172,7 +173,15 @@ func (c *quicConnection) writeDataAsync(data []byte) error {
 // 🆕 直接写入数据的方法，仅在 writeLoop 中使用
 func (c *quicConnection) writeDataDirect(data []byte) error {
 	// Write length prefix (4 bytes)
-	length := uint32(len(data))
+	// Check for potential overflow before conversion
+	dataLen := len(data)
+	if dataLen > 0xFFFFFFFF {
+		return fmt.Errorf("data too large: %d bytes", dataLen)
+	}
+	if dataLen < 0 {
+		return fmt.Errorf("invalid data length: %d", dataLen)
+	}
+	length := uint32(dataLen) // Safe conversion after bounds check
 	if err := binary.Write(c.stream, binary.BigEndian, length); err != nil {
 		return fmt.Errorf("write length: %v", err)
 	}
@@ -227,7 +236,9 @@ func (c *quicConnection) Close() error {
 
 		// Close stream
 		if c.stream != nil {
-			c.stream.Close()
+			if err := c.stream.Close(); err != nil {
+				logger.Debug("Error closing QUIC stream", "err", err)
+			}
 		}
 
 		// Only client connections close the entire QUIC connection

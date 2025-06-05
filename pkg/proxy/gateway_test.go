@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -292,7 +291,7 @@ func TestClientConn_RouteMessage(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(_ *testing.T) {
 			tt.setup()
 			// This test mainly ensures no panic occurs
 			client.routeMessage(tt.msg)
@@ -311,7 +310,7 @@ func TestClientConn_CreateMessageChannel(t *testing.T) {
 		cancel:   cancel,
 	}
 
-	connID := "test-conn"
+	connID := TestConnID
 	client.createMessageChannel(connID)
 
 	client.msgChansMu.RLock()
@@ -343,23 +342,27 @@ func TestClientConn_CloseConnection(t *testing.T) {
 
 	// Create a mock connection
 	pipe1, pipe2 := net.Pipe()
-	defer pipe1.Close()
+	defer func() {
+		if err := pipe1.Close(); err != nil {
+			t.Logf("Error closing pipe1: %v", err)
+		}
+	}()
 
 	proxyConn := &Conn{
-		ID:        "test-conn",
+		ID:        TestConnID,
 		LocalConn: pipe2,
 		Done:      make(chan struct{}),
 	}
 
-	client.Conns["test-conn"] = proxyConn
-	client.msgChans["test-conn"] = make(chan map[string]interface{}, 1)
+	client.Conns[TestConnID] = proxyConn
+	client.msgChans[TestConnID] = make(chan map[string]interface{}, 1)
 
 	// Test close connection
-	client.closeConnection("test-conn")
+	client.closeConnection(TestConnID)
 
 	// Verify connection was removed
-	assert.NotContains(t, client.Conns, "test-conn")
-	assert.NotContains(t, client.msgChans, "test-conn")
+	assert.NotContains(t, client.Conns, TestConnID)
+	assert.NotContains(t, client.msgChans, TestConnID)
 
 	// Verify Done channel was closed
 	select {
@@ -386,14 +389,18 @@ func TestClientConn_StopBasic(t *testing.T) {
 
 	// Add a mock connection
 	pipe1, pipe2 := net.Pipe()
-	defer pipe1.Close()
+	defer func() {
+		if err := pipe1.Close(); err != nil {
+			t.Logf("Error closing pipe1: %v", err)
+		}
+	}()
 
 	proxyConn := &Conn{
-		ID:        "test-conn",
+		ID:        TestConnID,
 		LocalConn: pipe2,
 		Done:      make(chan struct{}),
 	}
-	client.Conns["test-conn"] = proxyConn
+	client.Conns[TestConnID] = proxyConn
 
 	// Test stop - this should no longer panic with our improved error handling
 	// The new implementation safely handles nil Conn and Writer
@@ -408,16 +415,24 @@ func TestClientConn_StopBasic(t *testing.T) {
 
 func TestProxyConn_Basic(t *testing.T) {
 	pipe1, pipe2 := net.Pipe()
-	defer pipe1.Close()
-	defer pipe2.Close()
+	defer func() {
+		if err := pipe1.Close(); err != nil {
+			t.Logf("Error closing pipe1: %v", err)
+		}
+	}()
+	defer func() {
+		if err := pipe2.Close(); err != nil {
+			t.Logf("Error closing pipe2: %v", err)
+		}
+	}()
 
 	proxyConn := &Conn{
-		ID:        "test-conn",
+		ID:        TestConnID,
 		LocalConn: pipe2,
 		Done:      make(chan struct{}),
 	}
 
-	assert.Equal(t, "test-conn", proxyConn.ID)
+	assert.Equal(t, TestConnID, proxyConn.ID)
 	assert.Equal(t, pipe2, proxyConn.LocalConn)
 	assert.NotNil(t, proxyConn.Done)
 }
@@ -453,68 +468,4 @@ func TestGateway_NewGatewayErrors(t *testing.T) {
 			assert.Contains(t, err.Error(), tt.expectError)
 		})
 	}
-}
-
-// Mock implementations for testing
-
-type mockWebSocketConn struct {
-	closed bool
-	mu     sync.Mutex
-}
-
-func (m *mockWebSocketConn) Close() error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.closed = true
-	return nil
-}
-
-func (m *mockWebSocketConn) ReadJSON(v interface{}) error {
-	return fmt.Errorf("mock read error")
-}
-
-func (m *mockWebSocketConn) WriteJSON(v interface{}) error {
-	return nil
-}
-
-func (m *mockWebSocketConn) SetReadDeadline(t time.Time) error {
-	return nil
-}
-
-func (m *mockWebSocketConn) SetWriteDeadline(t time.Time) error {
-	return nil
-}
-
-func (m *mockWebSocketConn) SetPongHandler(h func(appData string) error) {
-}
-
-func (m *mockWebSocketConn) SetPingHandler(h func(appData string) error) {
-}
-
-func (m *mockWebSocketConn) WriteMessage(messageType int, data []byte) error {
-	return nil
-}
-
-func (m *mockWebSocketConn) ReadMessage() (messageType int, p []byte, err error) {
-	return 0, nil, fmt.Errorf("mock read error")
-}
-
-func (m *mockWebSocketConn) LocalAddr() net.Addr {
-	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0}
-}
-
-func (m *mockWebSocketConn) RemoteAddr() net.Addr {
-	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 80}
-}
-
-func (m *mockWebSocketConn) SetDeadline(t time.Time) error {
-	return nil
-}
-
-func (m *mockWebSocketConn) Read(b []byte) (n int, err error) {
-	return 0, fmt.Errorf("mock read error")
-}
-
-func (m *mockWebSocketConn) Write(b []byte) (n int, err error) {
-	return len(b), nil
 }

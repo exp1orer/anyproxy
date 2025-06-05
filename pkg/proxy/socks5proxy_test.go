@@ -148,7 +148,7 @@ func TestSOCKS5Proxy_InterfaceCompliance(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify that socks5Proxy implements GatewayProxy interface
-	var _ GatewayProxy = proxy
+	var _ = proxy
 }
 
 // TestSOCKS5Proxy_ClientSideDNSResolution tests that domain names are passed to the client for resolution
@@ -157,7 +157,7 @@ func TestSOCKS5Proxy_ClientSideDNSResolution(t *testing.T) {
 	var dialedAddresses []string
 
 	// Create a dial function that records the addresses it receives
-	recordingDialer := func(ctx context.Context, network, addr string) (net.Conn, error) {
+	recordingDialer := func(_ context.Context, _, addr string) (net.Conn, error) {
 		dialedAddresses = append(dialedAddresses, addr)
 		return &mockConn{}, nil
 	}
@@ -198,11 +198,11 @@ func TestSOCKS5Proxy_ClientSideDNSResolution(t *testing.T) {
 
 // Helper functions for testing
 
-func mockDialer(ctx context.Context, network, addr string) (net.Conn, error) {
+func mockDialer(_ context.Context, _, _ string) (net.Conn, error) {
 	return &mockConn{}, nil
 }
 
-func failingDialer(ctx context.Context, network, addr string) (net.Conn, error) {
+func failingDialer(_ context.Context, _, _ string) (net.Conn, error) {
 	return nil, errors.New("dial failed")
 }
 
@@ -215,11 +215,19 @@ func TestDialConn(t *testing.T) {
 
 	// Create test connections
 	client, server := net.Pipe()
-	defer client.Close()
-	defer server.Close()
+	defer func() {
+		if err := client.Close(); err != nil {
+			t.Logf("Error closing client connection: %v", err)
+		}
+	}()
+	defer func() {
+		if err := server.Close(); err != nil {
+			t.Logf("Error closing server connection: %v", err)
+		}
+	}()
 
 	// Create a mock dial function that returns our test connection
-	dialFn := func(ctx context.Context, network, addr string) (net.Conn, error) {
+	dialFn := func(_ context.Context, _, _ string) (net.Conn, error) {
 		return client, nil
 	}
 

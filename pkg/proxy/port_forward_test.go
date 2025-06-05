@@ -76,7 +76,9 @@ func TestPortConflictDetection(t *testing.T) {
 	}
 
 	// First client opens port (this will fail because we don't have real connections, but we test conflict detection)
-	pm.OpenPorts(client1, openPorts)
+	if err := pm.OpenPorts(client1, openPorts); err != nil {
+		t.Logf("Expected error opening ports without real connections: %v", err)
+	}
 
 	// Manually add to port owners to simulate successful opening
 	pm.portOwners[9998] = client1.ID
@@ -97,18 +99,23 @@ func TestClientPortCleanup(t *testing.T) {
 	pm := NewPortForwardManager()
 	defer pm.Stop()
 
-	clientID := "test-client"
+	// Setup
+	clientID := TestClientID
 
 	// Manually add some port ownership to test cleanup
 	pm.clientPorts[clientID] = make(map[int]*PortListener)
 	pm.portOwners[9997] = clientID
 
 	// Create a proper TCP listener for testing
-	listener, err := net.Listen("tcp", ":0") // Use available port
+	listener, err := net.Listen("tcp", "127.0.0.1:0") // Use available port on localhost only
 	if err != nil {
 		t.Fatalf("Failed to create test listener: %v", err)
 	}
-	defer listener.Close()
+	defer func() {
+		if err := listener.Close(); err != nil {
+			t.Logf("Error closing listener: %v", err)
+		}
+	}()
 
 	// Create a properly initialized PortListener
 	ctx1, cancel1 := context.WithCancel(context.Background())
@@ -141,7 +148,8 @@ func TestGetClientPorts(t *testing.T) {
 	pm := NewPortForwardManager()
 	defer pm.Stop()
 
-	clientID := "test-client"
+	// Setup
+	clientID := TestClientID
 
 	// Test getting ports for non-existent client
 	ports := pm.GetClientPorts(clientID)
@@ -153,17 +161,25 @@ func TestGetClientPorts(t *testing.T) {
 	pm.clientPorts[clientID] = make(map[int]*PortListener)
 
 	// Create proper listeners for testing
-	listener1, err := net.Listen("tcp", ":0")
+	listener1, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("Failed to create test listener1: %v", err)
 	}
-	defer listener1.Close()
+	defer func() {
+		if err := listener1.Close(); err != nil {
+			t.Logf("Error closing listener1: %v", err)
+		}
+	}()
 
 	packetConn, err := net.ListenPacket("udp", ":0")
 	if err != nil {
 		t.Fatalf("Failed to create test packet conn: %v", err)
 	}
-	defer packetConn.Close()
+	defer func() {
+		if err := packetConn.Close(); err != nil {
+			t.Logf("Error closing packet connection: %v", err)
+		}
+	}()
 
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	defer cancel2()
@@ -207,15 +223,20 @@ func TestPortForwardManagerStop(t *testing.T) {
 	pm := NewPortForwardManager()
 
 	// Add some test data with proper initialization
-	clientID := "test-client"
+	// Setup
+	clientID := TestClientID
 	pm.clientPorts[clientID] = make(map[int]*PortListener)
 
 	// Create a proper listener for testing
-	listener, err := net.Listen("tcp", ":0")
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("Failed to create test listener: %v", err)
 	}
-	defer listener.Close()
+	defer func() {
+		if err := listener.Close(); err != nil {
+			t.Logf("Error closing listener: %v", err)
+		}
+	}()
 
 	ctx4, cancel4 := context.WithCancel(context.Background())
 	defer cancel4()
@@ -257,4 +278,26 @@ func containsMiddle(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestPortForwardManagerWithClient(t *testing.T) {
+	// Create a port forwarding manager
+	pm := NewPortForwardManager()
+	defer pm.Stop()
+
+	// Create a mock client conn
+	client1 := &ClientConn{
+		ID:      "client1",
+		GroupID: "group1",
+	}
+
+	// Add open ports to the client
+	openPorts := []config.OpenPort{
+		{RemotePort: 8080, LocalHost: "127.0.0.1", LocalPort: 80, Protocol: "tcp"},
+		{RemotePort: 8443, LocalHost: "127.0.0.1", LocalPort: 443, Protocol: "tcp"},
+	}
+
+	if err := pm.OpenPorts(client1, openPorts); err != nil {
+		t.Logf("Error opening ports: %v", err)
+	}
 }

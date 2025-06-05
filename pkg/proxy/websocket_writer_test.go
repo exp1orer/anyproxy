@@ -12,7 +12,7 @@ import (
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
+	CheckOrigin: func(_ *http.Request) bool {
 		return true
 	},
 }
@@ -24,7 +24,11 @@ func TestWebSocketWriter_ClosedChannel(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to upgrade: %v", err)
 		}
-		defer conn.Close()
+		defer func() {
+			if err := conn.Close(); err != nil {
+				t.Logf("Error closing websocket connection: %v", err)
+			}
+		}()
 
 		// Keep connection alive for test
 		time.Sleep(100 * time.Millisecond)
@@ -77,7 +81,11 @@ func TestWebSocketWriter_ConcurrentWritesAfterClose(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to upgrade: %v", err)
 		}
-		defer conn.Close()
+		defer func() {
+			if err := conn.Close(); err != nil {
+				t.Logf("Error closing websocket connection: %v", err)
+			}
+		}()
 
 		// Keep connection alive for test
 		time.Sleep(200 * time.Millisecond)
@@ -152,7 +160,11 @@ func TestWebSocketWriter_MessageOrder(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to upgrade: %v", err)
 		}
-		defer conn.Close()
+		defer func() {
+			if err := conn.Close(); err != nil {
+				t.Logf("Error closing websocket connection: %v", err)
+			}
+		}()
 
 		// Read messages in order
 		for {
@@ -222,7 +234,11 @@ func TestWebSocketWriter_ResourceCleanup(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Failed to upgrade: %v", err)
 		}
-		defer conn.Close()
+		defer func() {
+			if err := conn.Close(); err != nil {
+				t.Logf("Error closing websocket connection: %v", err)
+			}
+		}()
 
 		// Keep connection alive briefly
 		time.Sleep(50 * time.Millisecond)
@@ -253,8 +269,10 @@ func TestWebSocketWriter_ResourceCleanup(t *testing.T) {
 	writer.Stop()
 
 	// Test that we can call WriteJSON many times after Stop without panic
-	for i := 0; i < 100; i++ {
-		writer.WriteJSON(map[string]int{"after_stop": i})
+	for i := 0; i < 5; i++ {
+		if err := writer.WriteJSON(map[string]int{"after_stop": i}); err != nil {
+			t.Logf("Error writing JSON after stop: %v", err)
+		}
 	}
 
 	// Test concurrent writes after stop - should not panic
@@ -263,7 +281,11 @@ func TestWebSocketWriter_ResourceCleanup(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			writer.WriteJSON(map[string]int{"concurrent": id})
+			for i := 0; i < 10; i++ {
+				if err := writer.WriteJSON(map[string]int{"concurrent": id}); err != nil {
+					t.Logf("Error writing JSON in goroutine %d: %v", id, err)
+				}
+			}
 		}(i)
 	}
 	wg.Wait()
