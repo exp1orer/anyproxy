@@ -8,10 +8,11 @@ import (
 
 // Config represents the main configuration
 type Config struct {
-	Proxy   ProxyConfig   `yaml:"proxy"`
-	Gateway GatewayConfig `yaml:"gateway"`
-	Client  ClientConfig  `yaml:"client"`
-	Log     LogConfig     `yaml:"log"`
+	Proxy     ProxyConfig     `yaml:"proxy"`
+	Transport TransportConfig `yaml:"transport"`
+	Gateway   GatewayConfig   `yaml:"gateway"`
+	Client    ClientConfig    `yaml:"client"`
+	Log       LogConfig       `yaml:"log"`
 }
 
 // LogConfig represents the logging configuration
@@ -46,6 +47,12 @@ type SOCKS5Config struct {
 	ListenAddr   string `yaml:"listen_addr"`
 	AuthUsername string `yaml:"auth_username"`
 	AuthPassword string `yaml:"auth_password"`
+}
+
+// TransportConfig represents the configuration for the transport
+
+type TransportConfig struct {
+	Type string `yaml:"type"`
 }
 
 // HTTPConfig represents the configuration for the HTTP proxy

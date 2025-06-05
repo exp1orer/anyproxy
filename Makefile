@@ -1,4 +1,4 @@
-.PHONY: all build clean run-gateway run-client certs test lint docker-build docker-run package build-all help
+.PHONY: all build clean run-gateway run-client certs test lint docker-build docker-run help
 
 # Build variables
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -11,59 +11,67 @@ GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 CGO_ENABLED ?= 0
 
-# Binary names
-GATEWAY_BINARY = anyproxy-gateway
-CLIENT_BINARY = anyproxy-client
+# Binary names (v2 is the current version)
+GATEWAY_BINARY = anyproxy-gateway-v2
+CLIENT_BINARY = anyproxy-client-v2
 
 # Build directory
 BUILD_DIR = bin
-PACKAGE_DIR = build
 
 all: certs build ## Build everything
 
 help: ## Show this help message
 	@echo 'Usage: make [target]'
 	@echo ''
-	@echo 'Targets:'
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo 'Build Commands:'
+	@awk 'BEGIN {FS = " ## "} /^(build|run-).*##/ {gsub(/:.*/, "", $$1); printf "    %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo ''
+	@echo 'Development Commands:'
+	@awk 'BEGIN {FS = " ## "} /^(test|lint|fmt|vet|deps).*##/ {gsub(/:.*/, "", $$1); printf "    %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo ''
+	@echo 'Docker Commands:'
+	@awk 'BEGIN {FS = " ## "} /^docker.*##/ {gsub(/:.*/, "", $$1); printf "    %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo ''
+	@echo 'Other Commands:'
+	@awk 'BEGIN {FS = " ## "} !/^(build|run-|test|lint|fmt|vet|deps|docker).*##/ && /.*##/ {gsub(/:.*/, "", $$1); printf "    %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 build: ## Build binaries for current platform
-	@echo "Building for $(GOOS)/$(GOARCH)..."
+	@echo "Building v2 binaries for $(GOOS)/$(GOARCH)..."
 	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(GATEWAY_BINARY) cmd/gateway/main.go
-	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(CLIENT_BINARY) cmd/client/main.go
+	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(GATEWAY_BINARY) cmd/v2/gateway/main.go
+	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(CLIENT_BINARY) cmd/v2/client/main.go
 	@echo "Build completed: $(BUILD_DIR)/$(GATEWAY_BINARY), $(BUILD_DIR)/$(CLIENT_BINARY)"
 
 build-all: ## Build binaries for all platforms
 	@echo "Building for all platforms..."
-	@mkdir -p $(PACKAGE_DIR)
+	@mkdir -p build
 	
 	# Linux AMD64
 	@echo "Building for linux/amd64..."
-	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(PACKAGE_DIR)/$(GATEWAY_BINARY)-linux-amd64 cmd/gateway/main.go
-	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(PACKAGE_DIR)/$(CLIENT_BINARY)-linux-amd64 cmd/client/main.go
+	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(GATEWAY_BINARY)-linux-amd64 cmd/v2/gateway/main.go
+	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(CLIENT_BINARY)-linux-amd64 cmd/v2/client/main.go
 	
 	# Linux ARM64
 	@echo "Building for linux/arm64..."
-	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(PACKAGE_DIR)/$(GATEWAY_BINARY)-linux-arm64 cmd/gateway/main.go
-	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(PACKAGE_DIR)/$(CLIENT_BINARY)-linux-arm64 cmd/client/main.go
+	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o build/$(GATEWAY_BINARY)-linux-arm64 cmd/v2/gateway/main.go
+	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o build/$(CLIENT_BINARY)-linux-arm64 cmd/v2/client/main.go
 	
 	# Windows AMD64
 	@echo "Building for windows/amd64..."
-	@CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(PACKAGE_DIR)/$(GATEWAY_BINARY)-windows-amd64.exe cmd/gateway/main.go
-	@CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(PACKAGE_DIR)/$(CLIENT_BINARY)-windows-amd64.exe cmd/client/main.go
+	@CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(GATEWAY_BINARY)-windows-amd64.exe cmd/v2/gateway/main.go
+	@CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(CLIENT_BINARY)-windows-amd64.exe cmd/v2/client/main.go
 	
 	# macOS AMD64
 	@echo "Building for darwin/amd64..."
-	@CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(PACKAGE_DIR)/$(GATEWAY_BINARY)-darwin-amd64 cmd/gateway/main.go
-	@CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o $(PACKAGE_DIR)/$(CLIENT_BINARY)-darwin-amd64 cmd/client/main.go
+	@CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(GATEWAY_BINARY)-darwin-amd64 cmd/v2/gateway/main.go
+	@CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(CLIENT_BINARY)-darwin-amd64 cmd/v2/client/main.go
 	
 	# macOS ARM64
 	@echo "Building for darwin/arm64..."
-	@CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(PACKAGE_DIR)/$(GATEWAY_BINARY)-darwin-arm64 cmd/gateway/main.go
-	@CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o $(PACKAGE_DIR)/$(CLIENT_BINARY)-darwin-arm64 cmd/client/main.go
+	@CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o build/$(GATEWAY_BINARY)-darwin-arm64 cmd/v2/gateway/main.go
+	@CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o build/$(CLIENT_BINARY)-darwin-arm64 cmd/v2/client/main.go
 	
-	@echo "Cross-compilation completed. Binaries are in $(PACKAGE_DIR)/"
+	@echo "Cross-compilation completed. Binaries are in build/"
 
 certs: ## Generate TLS certificates
 	@echo "Generating TLS certificates..."
@@ -104,37 +112,28 @@ docker-build: ## Build Docker image
 		-t anyproxy:latest .
 	@echo "Docker image built: anyproxy:$(VERSION)"
 
-docker-run: docker-build ## Run with Docker Compose
-	@echo "Starting services with Docker Compose..."
-	@VERSION=$(VERSION) COMMIT=$(COMMIT) BUILD_TIME=$(BUILD_TIME) docker-compose up -d
-	@echo "Services started. Use 'docker-compose logs -f' to view logs"
+docker-run: docker-build ## Run with Docker
+	@echo "Starting services with Docker..."
+	@docker run -d --name anyproxy-gateway \
+		-p 8080:8080 -p 1080:1080 -p 8443:8443 \
+		anyproxy:$(VERSION)
+	@echo "Gateway started. Use 'docker logs anyproxy-gateway' to view logs"
 
-docker-stop: ## Stop Docker Compose services
-	@echo "Stopping Docker Compose services..."
-	@docker-compose down
-	@echo "Services stopped"
+docker-stop: ## Stop Docker containers
+	@echo "Stopping Docker containers..."
+	@docker stop anyproxy-gateway 2>/dev/null || true
+	@docker rm anyproxy-gateway 2>/dev/null || true
+	@echo "Containers stopped"
 
-docker-logs: ## View Docker Compose logs
-	@docker-compose logs -f
-
-package: build ## Create release package
-	@echo "Creating release package..."
-	@mkdir -p $(PACKAGE_DIR)
-	@tar -zcf $(PACKAGE_DIR)/anyproxy-$(VERSION)-$(GOOS)-$(GOARCH).tar.gz \
-		-C $(BUILD_DIR) $(GATEWAY_BINARY) $(CLIENT_BINARY) \
-		-C .. certs/ configs/config.yaml README.md CHANGELOG.md
-	@echo "Package created: $(PACKAGE_DIR)/anyproxy-$(VERSION)-$(GOOS)-$(GOARCH).tar.gz"
+docker-logs: ## View Docker logs
+	@docker logs -f anyproxy-gateway
 
 clean: ## Clean build artifacts
 	@echo "Cleaning build artifacts..."
-	@rm -rf $(BUILD_DIR) $(PACKAGE_DIR) coverage.out coverage.html
-	@docker-compose down --volumes --remove-orphans 2>/dev/null || true
+	@rm -rf $(BUILD_DIR) build coverage.out coverage.html
+	@docker stop anyproxy-gateway 2>/dev/null || true
+	@docker rm anyproxy-gateway 2>/dev/null || true
 	@echo "Clean completed"
-
-install-tools: ## Install development tools
-	@echo "Installing development tools..."
-	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-	@echo "Development tools installed"
 
 deps: ## Download dependencies
 	@echo "Downloading dependencies..."
@@ -153,5 +152,3 @@ vet: ## Run go vet
 	@echo "go vet completed"
 
 check: fmt vet lint test ## Run all checks (format, vet, lint, test)
-
-release: clean check build-all package ## Prepare release (clean, check, build-all, package)
