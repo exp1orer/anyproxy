@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/buhuipao/anyproxy/pkg/logger"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 	"github.com/gorilla/websocket"
 )
@@ -201,5 +202,6 @@ func (s *webSocketTransport) handleWebSocket(w http.ResponseWriter, r *http.Requ
 }
 
 func init() {
-	transport.RegisterTransportCreator("websocket", NewWebSocketTransportWithAuth)
+	// 修复：使用明确的常量进行注册
+	transport.RegisterTransportCreator(common.TransportTypeWebSocket, NewWebSocketTransportWithAuth)
 }

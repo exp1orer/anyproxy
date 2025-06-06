@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rs/xid"
-
 	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/buhuipao/anyproxy/pkg/logger"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
@@ -24,10 +22,9 @@ type ClientConn struct {
 	ID             string
 	GroupID        string
 	Conn           transport.Connection // 🆕 使用传输层连接
-	ConnsMu        sync.RWMutex
+	connMu         sync.RWMutex         // 修复：使用单个锁保护连接和消息通道
 	Conns          map[string]*Conn
 	msgChans       map[string]chan map[string]interface{}
-	msgChansMu     sync.RWMutex
 	ctx            context.Context
 	cancel         context.CancelFunc
 	stopOnce       sync.Once
@@ -53,9 +50,9 @@ func (c *ClientConn) Stop() {
 		c.cancel()
 
 		// Step 2: 获取连接数量 (与 v1 相同)
-		c.ConnsMu.RLock()
+		c.connMu.RLock()
 		connectionCount := len(c.Conns)
-		c.ConnsMu.RUnlock()
+		c.connMu.RUnlock()
 
 		if connectionCount > 0 {
 			logger.Info("Waiting for active connections to finish", "client_id", c.ID, "connection_count", connectionCount)
@@ -83,23 +80,24 @@ func (c *ClientConn) Stop() {
 
 		// Step 4: 关闭所有代理连接 (与 v1 相同)
 		logger.Debug("Closing all proxy connections", "client_id", c.ID, "connection_count", connectionCount)
-		c.ConnsMu.Lock()
+		c.connMu.Lock()
 		for connID := range c.Conns {
 			c.closeConnectionUnsafe(connID)
 		}
-		c.ConnsMu.Unlock()
+		c.connMu.Unlock()
 		if connectionCount > 0 {
 			logger.Debug("All proxy connections closed", "client_id", c.ID)
 		}
 
 		// Step 5: 关闭所有消息通道 (与 v1 相同)
-		c.msgChansMu.Lock()
+		// 修复：现在使用同一个锁，不需要再次加锁
+		c.connMu.Lock()
 		channelCount := len(c.msgChans)
 		for connID, msgChan := range c.msgChans {
 			close(msgChan)
 			delete(c.msgChans, connID)
 		}
-		c.msgChansMu.Unlock()
+		c.connMu.Unlock()
 		if channelCount > 0 {
 			logger.Debug("Closed message channels", "client_id", c.ID, "channel_count", channelCount)
 		}
@@ -123,9 +121,16 @@ func (c *ClientConn) Stop() {
 	})
 }
 
-func (c *ClientConn) dialNetwork(network, addr string) (net.Conn, error) {
-	// 生成连接ID (与 v1 相同)
-	connID := xid.New().String()
+func (c *ClientConn) dialNetwork(ctx context.Context, network, addr string) (net.Conn, error) {
+	// 优先使用 context 中的 connID，如果没有则生成新的
+	connID, ok := common.GetConnID(ctx)
+	if !ok {
+		connID = common.GenerateConnID()
+		logger.Debug("Generated new connection ID", "client_id", c.ID, "conn_id", connID)
+		// 将 connID 添加到 context 中，供后续组件使用
+		ctx = common.WithConnID(ctx, connID)
+	}
+
 	logger.Debug("Creating new network connection", "client_id", c.ID, "conn_id", connID, "network", network, "address", addr)
 
 	// 创建管道连接客户端和代理 (与 v1 相同)
@@ -139,22 +144,16 @@ func (c *ClientConn) dialNetwork(network, addr string) (net.Conn, error) {
 	}
 
 	// 注册连接 (与 v1 相同)
-	c.ConnsMu.Lock()
+	c.connMu.Lock()
 	c.Conns[connID] = proxyConn
 	connCount := len(c.Conns)
-	c.ConnsMu.Unlock()
+	c.connMu.Unlock()
 
 	logger.Debug("Connection registered", "client_id", c.ID, "conn_id", connID, "total_connections", connCount)
 
 	// 🆕 发送连接请求到客户端 (适配传输层)
-	connectMsg := map[string]interface{}{
-		"type":    "connect",
-		"id":      connID,
-		"network": network,
-		"address": addr,
-	}
-
-	err := c.Conn.WriteJSON(connectMsg)
+	// 使用二进制格式发送连接消息
+	err := c.writeConnectMessage(connID, network, addr)
 	if err != nil {
 		logger.Error("Failed to send connect message to client", "client_id", c.ID, "conn_id", connID, "err", err)
 		c.closeConnection(connID)
@@ -171,7 +170,9 @@ func (c *ClientConn) dialNetwork(network, addr string) (net.Conn, error) {
 	}()
 
 	// 🚨 修复：返回包装后的连接，与 v1 保持一致 (重要的地址信息包装)
-	return common.NewConnWrapper(pipe1, network, addr), nil
+	connWrapper := common.NewConnWrapper(pipe1, network, addr)
+	connWrapper.SetConnID(connID)
+	return connWrapper, nil
 }
 
 // handleMessage 处理来自客户端的消息 (从 v1 迁移，适配传输层)
@@ -187,9 +188,9 @@ func (c *ClientConn) handleMessage() {
 		default:
 		}
 
-		// 🆕 直接读取 JSON 消息，简化代码
-		var msg map[string]interface{}
-		if err := c.Conn.ReadJSON(&msg); err != nil {
+		// 🆕 读取消息（支持二进制和 JSON）
+		msg, err := c.readNextMessage()
+		if err != nil {
 			logger.Error("Transport read error", "client_id", c.ID, "messages_processed", messageCount, "err", err)
 			return
 		}
@@ -240,9 +241,9 @@ func (c *ClientConn) routeMessage(msg map[string]interface{}) {
 		c.createMessageChannel(connID)
 	}
 
-	c.msgChansMu.RLock()
+	c.connMu.RLock()
 	msgChan, exists := c.msgChans[connID]
-	c.msgChansMu.RUnlock()
+	c.connMu.RUnlock()
 
 	if !exists {
 		// 连接不存在，忽略消息 (与 v1 相同)
@@ -261,21 +262,25 @@ func (c *ClientConn) routeMessage(msg map[string]interface{}) {
 		logger.Debug("Message routing cancelled due to context", "client_id", c.ID, "conn_id", connID, "message_type", msgType)
 		return
 	default:
-		logger.Warn("Message channel full for connection", "client_id", c.ID, "conn_id", connID, "message_type", msgType)
+		// 修复：当通道满时关闭连接，而不是静默丢弃消息
+		logger.Error("Message channel full for connection, closing connection to prevent protocol inconsistency", "client_id", c.ID, "conn_id", connID, "message_type", msgType, "channel_size", len(msgChan), "channel_cap", cap(msgChan))
+		// 异步清理连接，避免死锁
+		go c.closeConnection(connID)
+		return
 	}
 }
 
 // createMessageChannel 为连接创建消息通道 (与 v1 相同)
 func (c *ClientConn) createMessageChannel(connID string) {
-	c.msgChansMu.Lock()
-	defer c.msgChansMu.Unlock()
+	c.connMu.Lock()
+	defer c.connMu.Unlock()
 
 	// 检查通道是否已经存在 (与 v1 相同)
 	if _, exists := c.msgChans[connID]; exists {
 		return
 	}
 
-	msgChan := make(chan map[string]interface{}, 100) // 缓冲100条消息
+	msgChan := make(chan map[string]interface{}, common.DefaultMessageChannelSize)
 	c.msgChans[connID] = msgChan
 
 	// 为此连接启动消息处理器 (与 v1 相同)
@@ -320,36 +325,40 @@ func (c *ClientConn) handleDataMessage(msg map[string]interface{}) {
 		return
 	}
 
-	// WebSocket JSON消息将二进制数据编码为base64字符串 (与 v1 相同)
-	dataStr, ok := msg["data"].(string)
-	if !ok {
+	var data []byte
+
+	// 首先尝试直接获取字节数据（二进制协议）
+	if rawData, ok := msg["data"].([]byte); ok {
+		data = rawData
+	} else if dataStr, ok := msg["data"].(string); ok {
+		// 兼容旧的 base64 格式
+		decoded, err := base64.StdEncoding.DecodeString(dataStr)
+		if err != nil {
+			logger.Error("Failed to decode base64 data", "client_id", c.ID, "conn_id", connID, "data_length", len(dataStr), "err", err)
+			return
+		}
+		data = decoded
+	} else {
 		logger.Error("Invalid data format in data message", "client_id", c.ID, "conn_id", connID, "data_type", fmt.Sprintf("%T", msg["data"]))
 		return
 	}
 
-	// 将base64字符串解码回[]byte (与 v1 相同)
-	data, err := base64.StdEncoding.DecodeString(dataStr)
-	if err != nil {
-		logger.Error("Failed to decode base64 data", "client_id", c.ID, "conn_id", connID, "data_length", len(dataStr), "err", err)
-		return
-	}
-
-	// 只记录较大的传输以减少噪音 (与 v1 相同)
-	if len(data) > 10000 {
-		logger.Debug("Gateway received large data chunk", "client_id", c.ID, "conn_id", connID, "bytes", len(data))
+	// 使用日志采样器减少噪音
+	if common.ShouldLogData() && len(data) > 1000 {
+		logger.Debug("Gateway received data chunk", "client_id", c.ID, "conn_id", connID, "bytes", len(data))
 	}
 
 	// 安全获取连接 (与 v1 相同)
-	c.ConnsMu.RLock()
+	c.connMu.RLock()
 	proxyConn, ok := c.Conns[connID]
-	c.ConnsMu.RUnlock()
+	c.connMu.RUnlock()
 	if !ok {
 		logger.Warn("Data message for unknown connection", "client_id", c.ID, "conn_id", connID, "data_bytes", len(data))
 		return
 	}
 
 	// 将数据写入本地连接，带上下文感知 (与 v1 相同)
-	deadline := time.Now().Add(30 * time.Second) // 增加到30秒以获得更好的代理性能
+	deadline := time.Now().Add(common.DefaultWriteTimeout)
 	if ctxDeadline, ok := c.ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
 		deadline = ctxDeadline
 	}
@@ -385,21 +394,20 @@ func (c *ClientConn) handleCloseMessage(msg map[string]interface{}) {
 
 // closeConnection 关闭连接并清理资源 (与 v1 相同)
 func (c *ClientConn) closeConnection(connID string) {
-	// 原子地从客户端的连接映射中移除 (与 v1 相同)
-	c.ConnsMu.Lock()
+	// 修复：使用单个锁原子地操作两个 map，避免竞态条件
+	c.connMu.Lock()
 	proxyConn, exists := c.Conns[connID]
 	if exists {
 		delete(c.Conns, connID)
 	}
-	c.ConnsMu.Unlock()
 
-	// 清理消息通道 (与 v1 相同)
-	c.msgChansMu.Lock()
+	// 同时清理消息通道
 	if msgChan, exists := c.msgChans[connID]; exists {
 		delete(c.msgChans, connID)
-		close(msgChan)
+		// 需要在锁外关闭通道，避免死锁
+		defer close(msgChan)
 	}
-	c.msgChansMu.Unlock()
+	c.connMu.Unlock()
 
 	// 只有在连接存在的情况下才进行清理 (与 v1 相同)
 	if !exists {
@@ -487,7 +495,7 @@ func (c *ClientConn) handleConnection(proxyConn *Conn) {
 	logger.Debug("Starting connection handler", "client_id", c.ID, "conn_id", proxyConn.ID)
 
 	// 增加缓冲区大小以获得更好的性能 (与 v1 相同)
-	buffer := make([]byte, 32*1024) // 32KB缓冲区匹配网关
+	buffer := make([]byte, common.DefaultBufferSize)
 	totalBytes := 0
 	readCount := 0
 	startTime := time.Now()
@@ -509,7 +517,7 @@ func (c *ClientConn) handleConnection(proxyConn *Conn) {
 		}
 
 		// 基于上下文设置读取截止时间 (与 v1 相同)
-		deadline := time.Now().Add(30 * time.Second)
+		deadline := time.Now().Add(common.DefaultReadTimeout)
 		if ctxDeadline, ok := c.ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
 			deadline = ctxDeadline
 		}
@@ -527,17 +535,8 @@ func (c *ClientConn) handleConnection(proxyConn *Conn) {
 				logger.Debug("Gateway read data from local connection", "client_id", c.ID, "conn_id", proxyConn.ID, "bytes_this_read", n, "total_bytes", totalBytes, "read_count", readCount)
 			}
 
-			// 将二进制数据编码为base64字符串 (与 v1 相同)
-			encodedData := base64.StdEncoding.EncodeToString(buffer[:n])
-
-			// 🆕 使用传输层发送数据
-			dataMsg := map[string]interface{}{
-				"type": common.MsgTypeData,
-				"id":   proxyConn.ID,
-				"data": encodedData,
-			}
-
-			writeErr := c.Conn.WriteJSON(dataMsg)
+			// 🆕 优化：使用二进制格式避免 base64 编码
+			writeErr := c.writeDataMessage(proxyConn.ID, buffer[:n])
 			if writeErr != nil {
 				logger.Error("Error writing data to client via transport", "client_id", c.ID, "conn_id", proxyConn.ID, "data_bytes", n, "total_bytes", totalBytes, "error", writeErr)
 				c.closeConnection(proxyConn.ID)
@@ -577,12 +576,7 @@ func (c *ClientConn) handleConnection(proxyConn *Conn) {
 			}
 
 			// 🆕 发送关闭消息到客户端
-			closeMsg := map[string]interface{}{
-				"type": common.MsgTypeClose,
-				"id":   proxyConn.ID,
-			}
-
-			closeErr := c.Conn.WriteJSON(closeMsg)
+			closeErr := c.writeCloseMessage(proxyConn.ID)
 			if closeErr != nil {
 				logger.Debug("Error sending close message to client", "client_id", c.ID, "conn_id", proxyConn.ID, "error", closeErr)
 			} else {
@@ -679,7 +673,7 @@ func (c *ClientConn) sendPortForwardResponse(success bool, message string) {
 		"message": message,
 	}
 
-	if err := c.Conn.WriteJSON(response); err != nil {
+	if err := c.writeJSONMessage(response); err != nil {
 		logger.Error("Failed to send port forward response", "client_id", c.ID, "err", err)
 	}
 }

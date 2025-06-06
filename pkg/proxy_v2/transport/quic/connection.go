@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/quic-go/quic-go"
 
@@ -89,11 +90,23 @@ func newQUICServerConnection(stream quic.Stream, conn quic.Connection, clientID,
 // 🆕 异步写入 goroutine，避免锁竞争
 func (c *quicConnection) writeLoop() {
 	defer func() {
-		// 清空队列中的错误通道
-		for req := range c.writeChan {
-			if req.errChan != nil {
-				req.errChan <- fmt.Errorf("connection closed")
-				close(req.errChan)
+		// 修复：确保清空所有待处理的请求，避免 goroutine 泄漏
+		// 先处理已经在队列中的请求
+		for {
+			select {
+			case req := <-c.writeChan:
+				if req.errChan != nil {
+					select {
+					case req.errChan <- fmt.Errorf("connection closed"):
+						// 成功发送错误
+					default:
+						// 如果没有人在等待，直接跳过
+					}
+					close(req.errChan)
+				}
+			default:
+				// 队列已空，退出
+				return
 			}
 		}
 	}()
@@ -102,7 +115,12 @@ func (c *quicConnection) writeLoop() {
 		select {
 		case <-c.ctx.Done():
 			return
-		case req := <-c.writeChan:
+		case req, ok := <-c.writeChan:
+			if !ok {
+				// writeChan 已关闭
+				return
+			}
+
 			if c.closed {
 				if req.errChan != nil {
 					req.errChan <- fmt.Errorf("connection closed")
@@ -157,15 +175,20 @@ func (c *quicConnection) writeDataAsync(data []byte) error {
 		case err := <-errChan:
 			return err
 		case <-c.ctx.Done():
-			// 🆕 确保 errChan 不泄漏
+			// 修复：使用带超时的 select 防止 goroutine 泄漏
 			go func() {
-				<-errChan // 消费可能的错误
+				select {
+				case <-errChan:
+					// 成功消费错误
+				case <-time.After(5 * time.Second):
+					// 超时后退出，防止永久阻塞
+					logger.Warn("Timeout waiting for write error channel", "client_id", c.clientID)
+				}
 			}()
 			return c.ctx.Err()
 		}
 	case <-c.ctx.Done():
-		// 🆕 确保 errChan 不泄漏
-		close(errChan)
+		// 修复：不需要关闭 errChan，因为没有 goroutine 在等待它
 		return c.ctx.Err()
 	}
 }

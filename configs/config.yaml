@@ -21,7 +21,7 @@ proxy:
     auth_password: "password"
 
 transport:
-  type: "grpc"
+  type: "websocket"
 
 gateway:
   listen_addr: ":8443"

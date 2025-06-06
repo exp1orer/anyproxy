@@ -2,8 +2,8 @@ package websocket
 
 import (
 	"context"
+	"fmt"
 	"sync"
-	"time"
 
 	"github.com/buhuipao/anyproxy/pkg/logger"
 	"github.com/gorilla/websocket"
@@ -23,11 +23,11 @@ type Writer struct {
 	connectionID string
 }
 
-// NewWriter creates a new WebSocket writer (从 v1 完整迁移)
-func NewWriter(conn *websocket.Conn, writeCh chan interface{}) *Writer {
-	connectionID := generateConnectionID()
-
-	logger.Debug("Creating new WebSocket writer", "connection_id", connectionID, "remote_addr", conn.RemoteAddr(), "local_addr", conn.LocalAddr(), "write_channel_cap", cap(writeCh))
+// NewWriterWithID creates a new WebSocket writer with specific connection ID
+// connID is required for proper request tracking across the system
+func NewWriterWithID(conn *websocket.Conn, writeCh chan interface{}, connID string) *Writer {
+	// connID 应该由调用方提供，确保有意义的追踪
+	logger.Debug("Creating new WebSocket writer", "connection_id", connID, "remote_addr", conn.RemoteAddr(), "local_addr", conn.LocalAddr(), "write_channel_cap", cap(writeCh))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	writer := &Writer{
@@ -35,10 +35,10 @@ func NewWriter(conn *websocket.Conn, writeCh chan interface{}) *Writer {
 		writeCh:      writeCh,
 		ctx:          ctx,
 		cancel:       cancel,
-		connectionID: connectionID,
+		connectionID: connID,
 	}
 
-	logger.Debug("WebSocket writer created successfully", "connection_id", connectionID)
+	logger.Debug("WebSocket writer created successfully", "connection_id", connID)
 
 	return writer
 }
@@ -94,9 +94,9 @@ func (w *Writer) WriteJSON(v interface{}) error {
 		logger.Debug("Write cancelled - WebSocket writer stopped during queue", "connection_id", w.connectionID)
 		return websocket.ErrCloseSent
 	default:
-		// Channel is full, log and drop message
-		logger.Error("WebSocket write channel full, dropping message", "connection_id", w.connectionID, "queue_capacity", cap(w.writeCh), "total_messages", w.messageCount)
-		return nil
+		// 修复：当通道满时返回错误，而不是静默丢弃消息
+		logger.Error("WebSocket write channel full, rejecting message", "connection_id", w.connectionID, "queue_capacity", cap(w.writeCh), "total_messages", w.messageCount)
+		return fmt.Errorf("write channel full: cannot queue message")
 	}
 }
 
@@ -186,9 +186,4 @@ func (w *Writer) drainMessages() {
 			return
 		}
 	}
-}
-
-// generateConnectionID generates a unique connection ID for tracking (从 v1 完整迁移)
-func generateConnectionID() string {
-	return time.Now().Format("20060102-150405.000000")
 }

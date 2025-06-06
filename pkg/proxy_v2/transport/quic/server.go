@@ -11,6 +11,7 @@ import (
 	"github.com/quic-go/quic-go"
 
 	"github.com/buhuipao/anyproxy/pkg/logger"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
@@ -303,5 +304,6 @@ func generateSelfSignedCert() (tls.Certificate, error) {
 
 // Register the transport creator
 func init() {
-	transport.RegisterTransportCreator("quic", NewQUICTransportWithAuth)
+	// 修复：使用明确的常量进行注册
+	transport.RegisterTransportCreator(common.TransportTypeQUIC, NewQUICTransportWithAuth)
 }

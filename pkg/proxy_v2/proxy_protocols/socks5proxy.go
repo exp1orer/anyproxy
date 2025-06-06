@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"time"
 
 	"github.com/things-go/go-socks5"
 
@@ -54,13 +53,17 @@ func NewSOCKS5ProxyWithAuth(config *config.SOCKS5Config, dialFn func(context.Con
 
 	// 创建包装的拨号函数，支持组信息提取 (与 v1 相同)
 	wrappedDialFunc := func(ctx context.Context, network, addr string, request *socks5.Request) (net.Conn, error) {
-		requestID := fmt.Sprintf("%d", time.Now().UnixNano())
+		// 在请求开始时就生成 connID，贯穿整个请求生命周期
+		connID := common.GenerateConnID()
 
 		clientAddr := "unknown"
 		if request != nil {
 			clientAddr = request.RemoteAddr.String()
 		}
-		logger.Debug("SOCKS5 dial request received", "request_id", requestID, "network", network, "address", addr, "client", clientAddr)
+		logger.Info("SOCKS5 dial request received", "conn_id", connID, "network", network, "address", addr, "client", clientAddr)
+
+		// 将 connID 添加到 context 中
+		ctx = common.WithConnID(ctx, connID)
 
 		var userCtx *common.UserContext
 
@@ -70,15 +73,15 @@ func NewSOCKS5ProxyWithAuth(config *config.SOCKS5Config, dialFn func(context.Con
 				groupID := ""
 				if groupExtractor != nil {
 					groupID = groupExtractor(username)
-					logger.Debug("Extracted group ID from SOCKS5 username", "request_id", requestID, "username", username, "group_id", groupID)
+					logger.Debug("Extracted group ID from SOCKS5 username", "conn_id", connID, "username", username, "group_id", groupID)
 				}
 				userCtx = &common.UserContext{
 					Username: username,
 					GroupID:  groupID,
 				}
-				logger.Info("SOCKS5 user context extracted from authentication", "request_id", requestID, "username", username, "group_id", groupID, "target_addr", addr)
+				logger.Info("SOCKS5 user context extracted from authentication", "conn_id", connID, "username", username, "group_id", groupID, "target_addr", addr)
 			} else {
-				logger.Debug("No username found in SOCKS5 authentication context", "request_id", requestID)
+				logger.Debug("No username found in SOCKS5 authentication context", "conn_id", connID)
 			}
 		}
 
@@ -88,7 +91,7 @@ func NewSOCKS5ProxyWithAuth(config *config.SOCKS5Config, dialFn func(context.Con
 				Username: "socks5-user", // SOCKS5 的默认用户名
 				GroupID:  "",            // 默认组
 			}
-			logger.Debug("Using default user context for SOCKS5 request", "request_id", requestID, "default_username", userCtx.Username, "target_addr", addr)
+			logger.Debug("Using default user context for SOCKS5 request", "conn_id", connID, "default_username", userCtx.Username, "target_addr", addr)
 		}
 
 		// 将用户上下文添加到 context (与 v1 相同)
@@ -96,16 +99,18 @@ func NewSOCKS5ProxyWithAuth(config *config.SOCKS5Config, dialFn func(context.Con
 		const userKey userContextKey = "user"
 		ctx = context.WithValue(ctx, userKey, userCtx)
 
-		logger.Debug("Calling dial function for SOCKS5 request", "request_id", requestID, "network", network, "address", addr, "username", userCtx.Username, "group_id", userCtx.GroupID)
+		logger.Debug("Calling dial function for SOCKS5 request", "conn_id", connID, "network", network, "address", addr, "username", userCtx.Username, "group_id", userCtx.GroupID)
 
 		conn, err := dialFn(ctx, network, addr)
 
 		if err != nil {
-			logger.Error("SOCKS5 dial failed", "request_id", requestID, "network", network, "address", addr, "username", userCtx.Username, "group_id", userCtx.GroupID, "err", err)
+			logger.Error("SOCKS5 dial failed", "conn_id", connID, "network", network, "address", addr, "username", userCtx.Username, "group_id", userCtx.GroupID, "err", err)
 			return nil, err
 		}
 
-		logger.Info("SOCKS5 dial successful", "request_id", requestID, "network", network, "address", addr, "username", userCtx.Username, "group_id", userCtx.GroupID)
+		// 连接已经建立，不需要再从 ConnWrapper 获取 ID，因为我们已经有了
+
+		logger.Info("SOCKS5 dial successful", "conn_id", connID, "network", network, "address", addr, "username", userCtx.Username, "group_id", userCtx.GroupID)
 
 		// 🆕 使用 ConnWrapper 包装连接以提供正确的地址信息
 		wrappedConn := common.NewConnWrapper(conn, network, addr)

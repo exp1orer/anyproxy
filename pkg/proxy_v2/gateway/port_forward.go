@@ -368,19 +368,19 @@ func (pm *PortForwardManager) handleUDPPortListener(portListener *PortListener) 
 
 // handleUDPPacket 处理单个 UDP 数据包 (从 v1 完整迁移)
 func (pm *PortForwardManager) handleUDPPacket(portListener *PortListener, data []byte, clientAddr net.Addr) {
+	// 生成连接 ID
+	connID := common.GenerateConnID()
+	ctx := common.WithConnID(context.Background(), connID)
+
 	// Create target address
 	targetAddr := net.JoinHostPort(portListener.LocalHost, strconv.Itoa(portListener.LocalPort))
 
-	logger.Debug("New UDP packet to forwarded port", "port", portListener.Port, "client_id", portListener.ClientID, "target", targetAddr, "client_addr", clientAddr, "data_size", len(data))
+	logger.Debug("New UDP packet to forwarded port", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "client_addr", clientAddr, "data_size", len(data))
 
-	// Create UDP connection to target with context
-	ctx, cancel := context.WithTimeout(portListener.ctx, 30*time.Second)
-	defer cancel()
-
-	var d net.Dialer
-	targetConn, err := d.DialContext(ctx, "udp", targetAddr)
+	// 修复：使用客户端的 dialNetwork 方法通过代理隧道连接，而不是直接从 Gateway 连接
+	targetConn, err := portListener.Client.dialNetwork(ctx, common.ProtocolUDP, targetAddr)
 	if err != nil {
-		logger.Error("Failed to create UDP connection to target", "port", portListener.Port, "client_id", portListener.ClientID, "target", targetAddr, "err", err)
+		logger.Error("Failed to create UDP connection to target through client tunnel", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "err", err)
 		return
 	}
 	defer func() {
@@ -396,26 +396,37 @@ func (pm *PortForwardManager) handleUDPPacket(portListener *PortListener, data [
 		return
 	}
 
-	// Set read timeout for response
-	targetConn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	// 修复：异步处理 UDP 响应，避免不必要的等待
+	// 创建一个 goroutine 来等待响应，主函数立即返回
+	go func() {
+		// 使用更短的超时时间，并且是可配置的
+		timeout := 1 * time.Second
+		targetConn.SetReadDeadline(time.Now().Add(timeout))
 
-	// Read response from target
-	responseBuffer := make([]byte, 65536)
-	n, err := targetConn.Read(responseBuffer)
-	if err != nil {
-		// UDP often doesn't send responses, so this is not necessarily an error
-		logger.Debug("No response from UDP target", "port", portListener.Port, "err", err)
-		return
-	}
+		// Read response from target
+		responseBuffer := make([]byte, 65536)
+		n, err := targetConn.Read(responseBuffer)
+		if err != nil {
+			// UDP often doesn't send responses, so this is not necessarily an error
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				logger.Debug("UDP response timeout (expected for many UDP protocols)", "port", portListener.Port, "timeout", timeout)
+			} else {
+				logger.Debug("Error reading UDP response", "port", portListener.Port, "err", err)
+			}
+			return
+		}
 
-	// Send response back to client
-	_, err = portListener.PacketConn.WriteTo(responseBuffer[:n], clientAddr)
-	if err != nil {
-		logger.Error("Failed to send UDP response to client", "port", portListener.Port, "client_addr", clientAddr, "err", err)
-		return
-	}
+		// Send response back to client
+		_, err = portListener.PacketConn.WriteTo(responseBuffer[:n], clientAddr)
+		if err != nil {
+			logger.Error("Failed to send UDP response to client", "port", portListener.Port, "client_addr", clientAddr, "err", err)
+			return
+		}
 
-	logger.Debug("UDP packet forwarded successfully", "port", portListener.Port, "client_addr", clientAddr, "target", targetAddr, "request_size", len(data), "response_size", n)
+		logger.Debug("UDP response forwarded successfully", "port", portListener.Port, "client_addr", clientAddr, "target", targetAddr, "response_size", n, "response_time", timeout)
+	}()
+
+	logger.Debug("UDP request forwarded", "port", portListener.Port, "client_addr", clientAddr, "target", targetAddr, "request_size", len(data))
 }
 
 // handleForwardedConnection 处理转发的连接 (从 v1 完整迁移)
@@ -426,19 +437,23 @@ func (pm *PortForwardManager) handleForwardedConnection(portListener *PortListen
 		}
 	}()
 
+	// 生成连接 ID
+	connID := common.GenerateConnID()
+	ctx := common.WithConnID(context.Background(), connID)
+
 	// Create target address
 	targetAddr := net.JoinHostPort(portListener.LocalHost, strconv.Itoa(portListener.LocalPort))
 
-	logger.Info("🔄 PORT FORWARDING - New incoming connection", "port", portListener.Port, "client_id", portListener.ClientID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr(), "action", "Forwarding connection to target")
+	logger.Info("PORT FORWARDING - New incoming connection", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr(), "action", "Forwarding connection to target")
 
 	// Use the client's dialNetwork method to create connection - this reuses existing logic
-	clientConn, err := portListener.Client.dialNetwork(common.ProtocolTCP, targetAddr)
+	clientConn, err := portListener.Client.dialNetwork(ctx, common.ProtocolTCP, targetAddr)
 	if err != nil {
-		logger.Error("❌ PORT FORWARDING FAILED", "port", portListener.Port, "client_id", portListener.ClientID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr(), "err", err, "action", "Failed to establish connection to target")
+		logger.Error("PORT FORWARDING FAILED", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr(), "err", err, "action", "Failed to establish connection to target")
 		return
 	}
 
-	logger.Info("✅ PORT FORWARDING - Connection established", "port", portListener.Port, "client_id", portListener.ClientID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr(), "action", "Successfully connected to target")
+	logger.Info("PORT FORWARDING - Connection established", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr(), "action", "Successfully connected to target")
 	defer func() {
 		if err := clientConn.Close(); err != nil {
 			logger.Debug("Error closing client connection", "err", err)

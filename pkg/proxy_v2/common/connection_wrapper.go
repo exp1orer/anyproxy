@@ -2,6 +2,7 @@ package common
 
 import (
 	"net"
+	"sync"
 )
 
 // ConnWrapper wraps a net.Conn and provides custom LocalAddr and RemoteAddr
@@ -10,6 +11,8 @@ type ConnWrapper struct {
 	net.Conn
 	localAddr  net.Addr
 	remoteAddr net.Addr
+	connID     string
+	mu         sync.RWMutex // 添加读写锁保护 connID
 }
 
 var _ net.Conn = (*ConnWrapper)(nil)
@@ -71,4 +74,18 @@ func (cw *ConnWrapper) LocalAddr() net.Addr {
 // RemoteAddr returns the remote network address (same as v1)
 func (cw *ConnWrapper) RemoteAddr() net.Addr {
 	return cw.remoteAddr
+}
+
+// GetConnID returns the connection ID
+func (cw *ConnWrapper) GetConnID() string {
+	cw.mu.RLock()
+	defer cw.mu.RUnlock()
+	return cw.connID
+}
+
+// SetConnID sets the connection ID
+func (cw *ConnWrapper) SetConnID(connID string) {
+	cw.mu.Lock()
+	defer cw.mu.Unlock()
+	cw.connID = connID
 }

@@ -7,18 +7,27 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/buhuipao/anyproxy/pkg/logger"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
 )
+
+// 修复：使用缓冲区池减少内存分配
+var bufferPool = sync.Pool{
+	New: func() interface{} {
+		// 分配 32KB 缓冲区
+		buf := make([]byte, 32*1024)
+		return &buf
+	},
+}
 
 // HTTPProxy HTTP proxy implementation (based on v1 design)
 type HTTPProxy struct {
@@ -212,12 +221,17 @@ func (p *HTTPProxy) authenticateAndExtractUser(r *http.Request) (string, string,
 
 // handleConnect handles CONNECT requests for HTTPS tunneling (based on v1 logic)
 func (p *HTTPProxy) handleConnect(w http.ResponseWriter, r *http.Request, clientAddr string) {
-	requestID := fmt.Sprintf("%d", time.Now().UnixNano())
+	// 在请求开始时就生成 connID，贯穿整个请求生命周期
+	connID := common.GenerateConnID()
+	logger.Info("HTTP CONNECT request started", "conn_id", connID, "target_host", r.Host, "client", clientAddr)
+
+	// 将 connID 添加到 context 中
+	ctx := common.WithConnID(r.Context(), connID)
 
 	// Extract target host and port (same as v1)
 	host := r.Host
 	if host == "" {
-		logger.Error("CONNECT request missing host", "request_id", requestID, "client", clientAddr, "url", r.URL.String())
+		logger.Error("CONNECT request missing host", "conn_id", connID, "client", clientAddr, "url", r.URL.String())
 		http.Error(w, "Missing host", http.StatusBadRequest)
 		return
 	}
@@ -225,51 +239,53 @@ func (p *HTTPProxy) handleConnect(w http.ResponseWriter, r *http.Request, client
 	// Add default HTTPS port if not specified (same as v1)
 	if !strings.Contains(host, ":") {
 		host += ":443" // Default HTTPS port
-		logger.Debug("Added default HTTPS port", "request_id", requestID, "original_host", r.Host, "target_host", host)
+		logger.Debug("Added default HTTPS port", "conn_id", connID, "original_host", r.Host, "target_host", host)
 	}
 
-	logger.Info("Processing CONNECT request", "request_id", requestID, "target_host", host, "client", clientAddr)
+	logger.Info("Processing CONNECT request", "conn_id", connID, "target_host", host, "client", clientAddr)
 
 	// Hijack the connection first to handle raw TCP tunneling (same as v1)
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
-		logger.Error("Hijacking not supported by response writer", "request_id", requestID, "target_host", host)
+		logger.Error("Hijacking not supported by response writer", "conn_id", connID, "target_host", host)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
-	logger.Debug("Hijacking HTTP connection for tunnel", "request_id", requestID)
+	logger.Debug("Hijacking HTTP connection for tunnel", "conn_id", connID)
 	clientConn, clientBuf, err := hijacker.Hijack()
 	if err != nil {
-		logger.Error("Failed to hijack HTTP connection", "request_id", requestID, "target_host", host, "err", err)
+		logger.Error("Failed to hijack HTTP connection", "conn_id", connID, "target_host", host, "err", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 	defer clientConn.Close()
 
-	logger.Debug("HTTP connection hijacked successfully", "request_id", requestID, "client", clientConn.RemoteAddr())
+	logger.Debug("HTTP connection hijacked successfully", "conn_id", connID, "client", clientConn.RemoteAddr())
 
 	// Create connection to target through the dial function (same as v1)
-	logger.Debug("Dialing target host", "request_id", requestID, "target_host", host)
-	targetConn, err := p.dialFunc(r.Context(), "tcp", host)
+	logger.Debug("Dialing target host", "conn_id", connID, "target_host", host)
+	targetConn, err := p.dialFunc(ctx, "tcp", host)
 
 	if err != nil {
-		logger.Error("Failed to connect to target host", "request_id", requestID, "target_host", host, "err", err)
+		logger.Error("Failed to connect to target host", "conn_id", connID, "target_host", host, "err", err)
 		// Send error response manually since we've hijacked the connection (same as v1)
 		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
 		return
 	}
 	defer targetConn.Close()
 
-	logger.Debug("Connected to target host successfully", "request_id", requestID, "target_host", host, "target_addr", targetConn.RemoteAddr())
+	// 连接已经建立，不需要再从 ConnWrapper 获取 ID，因为我们已经有了
+
+	logger.Debug("Connected to target host successfully", "conn_id", connID, "target_host", host, "target_addr", targetConn.RemoteAddr())
 
 	// Send 200 Connection Established response manually (same as v1)
 	_, err = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 	if err != nil {
-		logger.Error("Failed to send CONNECT response to client", "request_id", requestID, "target_host", host, "err", err)
+		logger.Error("Failed to send CONNECT response to client", "conn_id", connID, "target_host", host, "err", err)
 		return
 	}
-	logger.Debug("Sent CONNECT response to client", "request_id", requestID)
+	logger.Debug("Sent CONNECT response to client", "conn_id", connID)
 
 	// Handle any buffered data from the client (same as v1)
 	if clientBuf != nil && clientBuf.Reader.Buffered() > 0 {
@@ -277,25 +293,32 @@ func (p *HTTPProxy) handleConnect(w http.ResponseWriter, r *http.Request, client
 		bufferedData := make([]byte, bufferedBytes)
 		if _, readErr := clientBuf.Read(bufferedData); readErr == nil {
 			if _, writeErr := targetConn.Write(bufferedData); writeErr == nil {
-				logger.Debug("Forwarded buffered client data", "request_id", requestID, "bytes", bufferedBytes)
+				logger.Debug("Forwarded buffered client data", "conn_id", connID, "bytes", bufferedBytes)
 			}
 		}
 	}
 
-	logger.Info("CONNECT tunnel established", "request_id", requestID, "target_host", host)
+	logger.Info("CONNECT tunnel established", "conn_id", connID, "target_host", host)
 
 	// Start bidirectional data transfer (same as v1)
-	go p.transfer(targetConn, clientConn, "target->client", requestID)
-	p.transfer(clientConn, targetConn, "client->target", requestID)
+	go p.transfer(targetConn, clientConn, "target->client", connID)
+	p.transfer(clientConn, targetConn, "client->target", connID)
 
-	logger.Info("CONNECT tunnel closed", "request_id", requestID, "target_host", host)
+	logger.Info("CONNECT tunnel closed", "conn_id", connID, "target_host", host)
 }
 
 // transfer copies data between two connections (🆕 migrated from v1)
-func (p *HTTPProxy) transfer(dst, src net.Conn, direction string, requestID string) {
-	logger.Debug("Starting data transfer", "request_id", requestID, "direction", direction, "src_addr", src.RemoteAddr(), "dst_addr", dst.RemoteAddr())
+func (p *HTTPProxy) transfer(dst, src net.Conn, direction string, connID string) {
+	logger.Debug("Starting data transfer", "conn_id", connID, "direction", direction, "src_addr", src.RemoteAddr(), "dst_addr", dst.RemoteAddr())
 
-	buffer := make([]byte, 32*1024) // 32KB buffer
+	// 修复：从缓冲区池获取缓冲区
+	bufPtr := bufferPool.Get().(*[]byte)
+	buffer := *bufPtr
+	defer func() {
+		// 将缓冲区返回到池中
+		bufferPool.Put(bufPtr)
+	}()
+
 	totalBytes := int64(0)
 
 	for {
@@ -312,7 +335,7 @@ func (p *HTTPProxy) transfer(dst, src net.Conn, direction string, requestID stri
 
 			_, writeErr := dst.Write(buffer[:n])
 			if writeErr != nil {
-				logger.Error("Transfer write error", "request_id", requestID, "direction", direction, "bytes_written", n, "total_bytes", totalBytes, "err", writeErr)
+				logger.Error("Transfer write error", "conn_id", connID, "direction", direction, "bytes_written", n, "total_bytes", totalBytes, "err", writeErr)
 				return
 			}
 		}
@@ -327,9 +350,9 @@ func (p *HTTPProxy) transfer(dst, src net.Conn, direction string, requestID stri
 			if strings.Contains(err.Error(), "use of closed network connection") ||
 				strings.Contains(err.Error(), "connection reset by peer") ||
 				err == io.EOF {
-				logger.Debug("Connection closed during transfer", "request_id", requestID, "direction", direction, "total_bytes", totalBytes)
+				logger.Debug("Connection closed during transfer", "conn_id", connID, "direction", direction, "total_bytes", totalBytes)
 			} else {
-				logger.Error("Transfer read error", "request_id", requestID, "direction", direction, "total_bytes", totalBytes, "err", err)
+				logger.Error("Transfer read error", "conn_id", connID, "direction", direction, "total_bytes", totalBytes, "err", err)
 			}
 			return
 		}
@@ -338,7 +361,12 @@ func (p *HTTPProxy) transfer(dst, src net.Conn, direction string, requestID stri
 
 // handleRequest handles normal HTTP requests (based on v1 logic)
 func (p *HTTPProxy) handleRequest(w http.ResponseWriter, r *http.Request, clientAddr string) {
-	requestID := fmt.Sprintf("%d", time.Now().UnixNano())
+	// 在请求开始时就生成 connID，贯穿整个请求生命周期
+	connID := common.GenerateConnID()
+	logger.Info("HTTP request started", "conn_id", connID, "method", r.Method, "url", r.URL.String(), "client", clientAddr)
+
+	// 将 connID 添加到 context 中
+	ctx := common.WithConnID(r.Context(), connID)
 
 	// Parse target URL (same as v1)
 	targetURL := r.URL
@@ -354,10 +382,10 @@ func (p *HTTPProxy) handleRequest(w http.ResponseWriter, r *http.Request, client
 			Path:     r.URL.Path,
 			RawQuery: r.URL.RawQuery,
 		}
-		logger.Debug("Constructed absolute URL from relative URL", "request_id", requestID, "original_url", r.URL.String(), "target_url", targetURL.String())
+		logger.Debug("Constructed absolute URL from relative URL", "conn_id", connID, "original_url", r.URL.String(), "target_url", targetURL.String())
 	}
 
-	logger.Info("Processing HTTP request", "request_id", requestID, "method", r.Method, "target_url", targetURL.String(), "client", clientAddr)
+	logger.Info("Processing HTTP request", "conn_id", connID, "method", r.Method, "target_url", targetURL.String(), "client", clientAddr)
 
 	// Create connection to target (same as v1)
 	host := targetURL.Host
@@ -367,24 +395,26 @@ func (p *HTTPProxy) handleRequest(w http.ResponseWriter, r *http.Request, client
 		} else {
 			host += ":80"
 		}
-		logger.Debug("Added default port to host", "request_id", requestID, "original_host", targetURL.Host, "target_host", host, "scheme", targetURL.Scheme)
+		logger.Debug("Added default port to host", "conn_id", connID, "original_host", targetURL.Host, "target_host", host, "scheme", targetURL.Scheme)
 	}
 
-	logger.Debug("Dialing target server", "request_id", requestID, "target_host", host)
-	targetConn, err := p.dialFunc(r.Context(), "tcp", host)
+	logger.Debug("Dialing target server", "conn_id", connID, "target_host", host)
+	targetConn, err := p.dialFunc(ctx, "tcp", host)
 
 	if err != nil {
-		logger.Error("Failed to connect to target server", "request_id", requestID, "target_host", host, "err", err)
+		logger.Error("Failed to connect to target server", "conn_id", connID, "target_host", host, "err", err)
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
 	defer targetConn.Close()
 
-	logger.Debug("Connected to target server successfully", "request_id", requestID, "target_host", host)
+	// 连接已经建立，不需要再从 ConnWrapper 获取 ID，因为我们已经有了
+
+	logger.Debug("Connected to target server successfully", "conn_id", connID, "target_host", host)
 
 	// For HTTPS, wrap with TLS (same as v1)
 	if targetURL.Scheme == common.SchemeHTTPS {
-		logger.Debug("Wrapping connection with TLS", "request_id", requestID, "server_name", strings.Split(host, ":")[0])
+		logger.Debug("Wrapping connection with TLS", "conn_id", connID, "server_name", strings.Split(host, ":")[0])
 		tlsConn := tls.Client(targetConn, &tls.Config{
 			ServerName: strings.Split(host, ":")[0],
 			MinVersion: tls.VersionTLS12, // Enforce minimum TLS 1.2
@@ -400,26 +430,26 @@ func (p *HTTPProxy) handleRequest(w http.ResponseWriter, r *http.Request, client
 	r.Header.Set("Connection", "close")
 
 	// Write request to target server (same as v1)
-	logger.Debug("Sending request to target server", "request_id", requestID)
+	logger.Debug("Sending request to target server", "conn_id", connID)
 	if err := r.Write(targetConn); err != nil {
-		logger.Error("Failed to write request to target server", "request_id", requestID, "target_host", host, "err", err)
+		logger.Error("Failed to write request to target server", "conn_id", connID, "target_host", host, "err", err)
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
 
 	// Read response from target server (same as v1)
-	logger.Debug("Reading response from target server", "request_id", requestID)
+	logger.Debug("Reading response from target server", "conn_id", connID)
 	targetReader := bufio.NewReader(targetConn)
 	response, err := http.ReadResponse(targetReader, r)
 
 	if err != nil {
-		logger.Error("Failed to read response from target server", "request_id", requestID, "target_host", host, "err", err)
+		logger.Error("Failed to read response from target server", "conn_id", connID, "target_host", host, "err", err)
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
 	defer response.Body.Close()
 
-	logger.Debug("Response received from target server", "request_id", requestID, "status_code", response.StatusCode, "content_length", response.ContentLength)
+	logger.Debug("Response received from target server", "conn_id", connID, "status_code", response.StatusCode, "content_length", response.ContentLength)
 
 	// Copy response headers (same as v1)
 	for key, values := range response.Header {
@@ -432,16 +462,16 @@ func (p *HTTPProxy) handleRequest(w http.ResponseWriter, r *http.Request, client
 	w.WriteHeader(response.StatusCode)
 
 	// Copy response body (same as v1)
-	logger.Debug("Copying response body to client", "request_id", requestID)
+	logger.Debug("Copying response body to client", "conn_id", connID)
 	bytesWritten, err := io.Copy(w, response.Body)
 
 	if err != nil {
-		logger.Error("Failed to copy response body to client", "request_id", requestID, "bytes_written", bytesWritten, "err", err)
+		logger.Error("Failed to copy response body to client", "conn_id", connID, "bytes_written", bytesWritten, "err", err)
 	} else {
-		logger.Debug("Response body copied successfully", "request_id", requestID, "bytes_written", bytesWritten)
+		logger.Debug("Response body copied successfully", "conn_id", connID, "bytes_written", bytesWritten)
 	}
 
-	logger.Info("HTTP request processing completed", "request_id", requestID, "method", r.Method, "target_url", targetURL.String(), "status_code", response.StatusCode, "bytes_written", bytesWritten)
+	logger.Info("HTTP request processing completed", "conn_id", connID, "method", r.Method, "target_url", targetURL.String(), "status_code", response.StatusCode, "bytes_written", bytesWritten)
 }
 
 // getClientIP extracts the client IP address (same as v1)

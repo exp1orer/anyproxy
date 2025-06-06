@@ -29,6 +29,8 @@ type Gateway struct {
 	clientsMu      sync.RWMutex
 	clients        map[string]*ClientConn
 	groups         map[string]map[string]struct{}
+	groupClients   map[string][]string // 修复：为轮询维护有序的客户端列表
+	groupCounters  map[string]int      // 修复：每个组的轮询计数器
 	portForwardMgr *PortForwardManager
 	ctx            context.Context
 	cancel         context.CancelFunc
@@ -56,6 +58,8 @@ func NewGateway(cfg *config.Config, transportType string) (*Gateway, error) {
 		transport:      transportImpl,
 		clients:        make(map[string]*ClientConn),
 		groups:         make(map[string]map[string]struct{}),
+		groupClients:   make(map[string][]string), // 修复：初始化有序客户端列表
+		groupCounters:  make(map[string]int),      // 修复：初始化轮询计数器
 		portForwardMgr: NewPortForwardManager(),
 		ctx:            ctx,
 		cancel:         cancel,
@@ -83,7 +87,7 @@ func NewGateway(cfg *config.Config, transportType string) (*Gateway, error) {
 			return nil, err
 		}
 		logger.Debug("Successfully selected client for dial", "client_id", client.ID, "group_id", groupID, "network", network, "address", addr)
-		return client.dialNetwork(network, addr)
+		return client.dialNetwork(ctx, network, addr)
 	}
 
 	// 创建代理实例 (与 v1 相同的逻辑)
@@ -333,9 +337,14 @@ func (g *Gateway) addClient(client *ClientConn) {
 	g.clients[client.ID] = client
 	if _, ok := g.groups[client.GroupID]; !ok {
 		g.groups[client.GroupID] = make(map[string]struct{})
+		g.groupClients[client.GroupID] = make([]string, 0) // 修复：初始化有序列表
+		g.groupCounters[client.GroupID] = 0                // 修复：初始化计数器
 		logger.Debug("Created new group", "group_id", client.GroupID)
 	}
 	g.groups[client.GroupID][client.ID] = struct{}{}
+
+	// 修复：添加到有序列表
+	g.groupClients[client.GroupID] = append(g.groupClients[client.GroupID], client.ID)
 
 	groupSize := len(g.groups[client.GroupID])
 	totalClients := len(g.clients)
@@ -360,8 +369,20 @@ func (g *Gateway) removeClient(clientID string) {
 	delete(g.clients, clientID)
 	delete(g.groups[client.GroupID], clientID)
 
+	// 修复：从有序列表中移除客户端
+	if clients, ok := g.groupClients[client.GroupID]; ok {
+		for i, id := range clients {
+			if id == clientID {
+				g.groupClients[client.GroupID] = append(clients[:i], clients[i+1:]...)
+				break
+			}
+		}
+	}
+
 	if len(g.groups[client.GroupID]) == 0 && client.GroupID != "" {
 		delete(g.groups, client.GroupID)
+		delete(g.groupClients, client.GroupID)  // 修复：清理有序列表
+		delete(g.groupCounters, client.GroupID) // 修复：清理计数器
 		logger.Debug("Removed empty group", "group_id", client.GroupID)
 	}
 
@@ -371,17 +392,27 @@ func (g *Gateway) removeClient(clientID string) {
 
 // getClientByGroup 根据组获取客户端 (与 v1 相同)
 func (g *Gateway) getClientByGroup(groupID string) (*ClientConn, error) {
-	g.clientsMu.RLock()
-	defer g.clientsMu.RUnlock()
+	g.clientsMu.Lock()
+	defer g.clientsMu.Unlock()
 
-	clients, exists := g.groups[groupID]
+	clients, exists := g.groupClients[groupID]
 	if !exists || len(clients) == 0 {
 		return nil, fmt.Errorf("no clients available in group: %s", groupID)
 	}
 
-	// 简单的轮询选择
-	for clientID := range clients {
+	// 修复：实现真正的轮询负载均衡
+	// 获取当前计数器值
+	counter := g.groupCounters[groupID]
+
+	// 尝试最多 len(clients) 次找到健康的客户端
+	for i := 0; i < len(clients); i++ {
+		// 计算当前索引
+		idx := (counter + i) % len(clients)
+		clientID := clients[idx]
+
 		if client, exists := g.clients[clientID]; exists {
+			// 更新计数器到下一个位置
+			g.groupCounters[groupID] = (idx + 1) % len(clients)
 			return client, nil
 		}
 	}
