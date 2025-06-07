@@ -134,7 +134,7 @@ func NewGateway(cfg *config.Config, transportType string) (*Gateway, error) {
 
 // extractGroupFromUsername 提取组ID (与 v1 相同)
 func (g *Gateway) extractGroupFromUsername(username string) string {
-	logger.Info("extractGroupFromUsername", "username", username)
+	logger.Debug("extractGroupFromUsername", "username", username)
 	parts := strings.Split(username, ".")
 	if len(parts) >= 2 {
 		return strings.Join(parts[1:], ".")

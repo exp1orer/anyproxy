@@ -3,7 +3,6 @@ package quic
 import (
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -147,15 +146,6 @@ func (c *quicConnection) WriteMessage(data []byte) error {
 	return c.writeDataAsync(data)
 }
 
-// WriteJSON implements transport.Connection
-func (c *quicConnection) WriteJSON(v interface{}) error {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return fmt.Errorf("marshal JSON: %v", err)
-	}
-	return c.writeDataAsync(data)
-}
-
 // 🆕 异步写入方法，无锁设计
 func (c *quicConnection) writeDataAsync(data []byte) error {
 	if c.closed {
@@ -232,15 +222,6 @@ func (c *quicConnection) ReadMessage() ([]byte, error) {
 	case <-c.ctx.Done():
 		return nil, c.ctx.Err()
 	}
-}
-
-// 🆕 ReadJSON 读取并解析 JSON 消息
-func (c *quicConnection) ReadJSON(v interface{}) error {
-	data, err := c.ReadMessage()
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, v)
 }
 
 // Close implements transport.Connection

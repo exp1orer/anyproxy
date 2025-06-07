@@ -444,16 +444,16 @@ func (pm *PortForwardManager) handleForwardedConnection(portListener *PortListen
 	// Create target address
 	targetAddr := net.JoinHostPort(portListener.LocalHost, strconv.Itoa(portListener.LocalPort))
 
-	logger.Info("PORT FORWARDING - New incoming connection", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr(), "action", "Forwarding connection to target")
+	logger.Info("New port forwarding connection", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr())
 
 	// Use the client's dialNetwork method to create connection - this reuses existing logic
 	clientConn, err := portListener.Client.dialNetwork(ctx, common.ProtocolTCP, targetAddr)
 	if err != nil {
-		logger.Error("PORT FORWARDING FAILED", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr(), "err", err, "action", "Failed to establish connection to target")
+		logger.Error("Port forwarding connection failed", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr(), "err", err)
 		return
 	}
 
-	logger.Info("PORT FORWARDING - Connection established", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr(), "action", "Successfully connected to target")
+	logger.Info("Port forwarding connection established", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr())
 	defer func() {
 		if err := clientConn.Close(); err != nil {
 			logger.Debug("Error closing client connection", "err", err)

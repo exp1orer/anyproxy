@@ -19,6 +19,10 @@ const (
 	BinaryMsgTypePortForward     byte = 0x04 // 端口转发请求
 	BinaryMsgTypePortForwardResp byte = 0x05 // 端口转发响应
 
+	// 认证消息类型 (0x06 - 0x0F)
+	BinaryMsgTypeAuth         byte = 0x06 // 认证请求
+	BinaryMsgTypeAuthResponse byte = 0x07 // 认证响应
+
 	// 数据消息类型 (0x10 - 0x1F)
 	BinaryMsgTypeData byte = 0x10 // 数据传输
 
@@ -141,7 +145,7 @@ func PackConnectMessage(connID, network, address string) []byte {
 	offset += ConnIDSize
 
 	// network长度 (2字节)
-	binary.BigEndian.PutUint16(payload[offset:], uint16(len(networkBytes)))
+	binary.BigEndian.PutUint16(payload[offset:], uint16(len(networkBytes))) //nolint:gosec // network is always short
 	offset += 2
 
 	// network内容
@@ -149,7 +153,7 @@ func PackConnectMessage(connID, network, address string) []byte {
 	offset += len(networkBytes)
 
 	// address长度 (2字节)
-	binary.BigEndian.PutUint16(payload[offset:], uint16(len(addressBytes)))
+	binary.BigEndian.PutUint16(payload[offset:], uint16(len(addressBytes))) //nolint:gosec // address is always short
 	offset += 2
 
 	// address内容
@@ -232,7 +236,7 @@ func PackConnectResponseMessage(connID string, success bool, errorMsg string) []
 	offset++
 
 	// error长度 (2字节)
-	binary.BigEndian.PutUint16(payload[offset:], uint16(len(errorBytes)))
+	binary.BigEndian.PutUint16(payload[offset:], uint16(len(errorBytes))) //nolint:gosec // error msg is always short
 	offset += 2
 
 	// error内容
@@ -316,20 +320,33 @@ func UnpackCloseMessage(data []byte) (connID string, err error) {
 }
 
 // --- 端口转发请求 ---
-// 格式: [版本:1][类型:1][clientID长度:2][clientID:N][端口数量:2][端口1:2][端口2:2]...
+// 格式: [版本:1][类型:1][clientID长度:2][clientID:N][端口数量:2][端口配置1][端口配置2]...
+// 端口配置格式: [remotePort:2][localPort:2][localHost长度:2][localHost:N][protocol长度:1][protocol:N]
+
+// PortConfig 端口转发配置
+type PortConfig struct {
+	RemotePort int
+	LocalPort  int
+	LocalHost  string
+	Protocol   string
+}
 
 // PackPortForwardMessage 打包端口转发请求
-func PackPortForwardMessage(clientID string, ports []int) []byte {
+func PackPortForwardMessage(clientID string, ports []PortConfig) []byte {
 	clientIDBytes := []byte(clientID)
 
 	// 计算总长度
-	totalLen := 2 + len(clientIDBytes) + 2 + len(ports)*2
+	totalLen := 2 + len(clientIDBytes) + 2 // clientID长度 + clientID + 端口数量
+	for _, port := range ports {
+		totalLen += 2 + 2 + 2 + len(port.LocalHost) + 1 + len(port.Protocol)
+	}
+
 	payload := make([]byte, totalLen)
 
 	offset := 0
 
 	// clientID长度 (2字节)
-	binary.BigEndian.PutUint16(payload[offset:], uint16(len(clientIDBytes)))
+	binary.BigEndian.PutUint16(payload[offset:], uint16(len(clientIDBytes))) //nolint:gosec // clientID is always short
 	offset += 2
 
 	// clientID内容
@@ -337,20 +354,43 @@ func PackPortForwardMessage(clientID string, ports []int) []byte {
 	offset += len(clientIDBytes)
 
 	// 端口数量 (2字节)
-	binary.BigEndian.PutUint16(payload[offset:], uint16(len(ports)))
+	binary.BigEndian.PutUint16(payload[offset:], uint16(len(ports))) //nolint:gosec // port count is limited
 	offset += 2
 
-	// 端口列表
+	// 端口配置列表
 	for _, port := range ports {
-		binary.BigEndian.PutUint16(payload[offset:], uint16(port))
+		// remotePort (2字节)
+		binary.BigEndian.PutUint16(payload[offset:], uint16(port.RemotePort)) //nolint:gosec // port is always valid
 		offset += 2
+
+		// localPort (2字节)
+		binary.BigEndian.PutUint16(payload[offset:], uint16(port.LocalPort)) //nolint:gosec // port is always valid
+		offset += 2
+
+		// localHost长度 (2字节)
+		localHostBytes := []byte(port.LocalHost)
+		binary.BigEndian.PutUint16(payload[offset:], uint16(len(localHostBytes))) //nolint:gosec // host is always short
+		offset += 2
+
+		// localHost内容
+		copy(payload[offset:], localHostBytes)
+		offset += len(localHostBytes)
+
+		// protocol长度 (1字节)
+		protocolBytes := []byte(port.Protocol)
+		payload[offset] = byte(len(protocolBytes)) //nolint:gosec // protocol is always short
+		offset++
+
+		// protocol内容
+		copy(payload[offset:], protocolBytes)
+		offset += len(protocolBytes)
 	}
 
 	return PackBinaryMessage(BinaryMsgTypePortForward, payload)
 }
 
 // UnpackPortForwardMessage 解包端口转发请求
-func UnpackPortForwardMessage(data []byte) (clientID string, ports []int, err error) {
+func UnpackPortForwardMessage(data []byte) (clientID string, ports []PortConfig, err error) {
 	if len(data) < 4 {
 		return "", nil, fmt.Errorf("port forward message too short: %d bytes", len(data))
 	}
@@ -373,14 +413,46 @@ func UnpackPortForwardMessage(data []byte) (clientID string, ports []int, err er
 	portCount := binary.BigEndian.Uint16(data[offset:])
 	offset += 2
 
-	// 提取端口列表
-	ports = make([]int, portCount)
+	// 提取端口配置列表
+	ports = make([]PortConfig, portCount)
 	for i := 0; i < int(portCount); i++ {
+		// remotePort
 		if offset+2 > len(data) {
-			return "", nil, fmt.Errorf("invalid port data")
+			return "", nil, fmt.Errorf("missing remote port")
 		}
-		ports[i] = int(binary.BigEndian.Uint16(data[offset:]))
+		ports[i].RemotePort = int(binary.BigEndian.Uint16(data[offset:]))
 		offset += 2
+
+		// localPort
+		if offset+2 > len(data) {
+			return "", nil, fmt.Errorf("missing local port")
+		}
+		ports[i].LocalPort = int(binary.BigEndian.Uint16(data[offset:]))
+		offset += 2
+
+		// localHost
+		if offset+2 > len(data) {
+			return "", nil, fmt.Errorf("missing local host length")
+		}
+		localHostLen := binary.BigEndian.Uint16(data[offset:])
+		offset += 2
+		if offset+int(localHostLen) > len(data) {
+			return "", nil, fmt.Errorf("invalid local host length")
+		}
+		ports[i].LocalHost = string(data[offset : offset+int(localHostLen)])
+		offset += int(localHostLen)
+
+		// protocol
+		if offset+1 > len(data) {
+			return "", nil, fmt.Errorf("missing protocol length")
+		}
+		protocolLen := data[offset]
+		offset++
+		if offset+int(protocolLen) > len(data) {
+			return "", nil, fmt.Errorf("invalid protocol length")
+		}
+		ports[i].Protocol = string(data[offset : offset+int(protocolLen)])
+		offset += int(protocolLen)
 	}
 
 	return clientID, ports, nil
@@ -414,7 +486,7 @@ func PackPortForwardResponseMessage(success bool, errorMsg string, statuses []Po
 	offset++
 
 	// error长度 (2字节)
-	binary.BigEndian.PutUint16(payload[offset:], uint16(len(errorBytes)))
+	binary.BigEndian.PutUint16(payload[offset:], uint16(len(errorBytes))) //nolint:gosec // error msg is always short
 	offset += 2
 
 	// error内容
@@ -422,12 +494,12 @@ func PackPortForwardResponseMessage(success bool, errorMsg string, statuses []Po
 	offset += len(errorBytes)
 
 	// 转发数量 (2字节)
-	binary.BigEndian.PutUint16(payload[offset:], uint16(len(statuses)))
+	binary.BigEndian.PutUint16(payload[offset:], uint16(len(statuses))) //nolint:gosec // status count is limited
 	offset += 2
 
 	// 状态列表
 	for _, status := range statuses {
-		binary.BigEndian.PutUint16(payload[offset:], uint16(status.Port))
+		binary.BigEndian.PutUint16(payload[offset:], uint16(status.Port)) //nolint:gosec // port is always valid
 		offset += 2
 		if status.Success {
 			payload[offset] = 1
@@ -483,4 +555,172 @@ func UnpackPortForwardResponseMessage(data []byte) (success bool, errorMsg strin
 	}
 
 	return success, errorMsg, statuses, nil
+}
+
+// --- 认证请求消息 ---
+// 格式: [版本:1][类型:1][clientID长度:2][clientID:N][groupID长度:2][groupID:N][username长度:2][username:N][password长度:2][password:N]
+
+// PackAuthMessage 打包认证请求
+func PackAuthMessage(clientID, groupID, username, password string) []byte {
+	clientIDBytes := []byte(clientID)
+	groupIDBytes := []byte(groupID)
+	usernameBytes := []byte(username)
+	passwordBytes := []byte(password)
+
+	// 计算总长度
+	totalLen := 2 + len(clientIDBytes) + 2 + len(groupIDBytes) + 2 + len(usernameBytes) + 2 + len(passwordBytes)
+	payload := make([]byte, totalLen)
+
+	offset := 0
+
+	// clientID长度 (2字节)
+	binary.BigEndian.PutUint16(payload[offset:], uint16(len(clientIDBytes))) //nolint:gosec // clientID is always short
+	offset += 2
+
+	// clientID内容
+	copy(payload[offset:], clientIDBytes)
+	offset += len(clientIDBytes)
+
+	// groupID长度 (2字节)
+	binary.BigEndian.PutUint16(payload[offset:], uint16(len(groupIDBytes))) //nolint:gosec // groupID is always short
+	offset += 2
+
+	// groupID内容
+	copy(payload[offset:], groupIDBytes)
+	offset += len(groupIDBytes)
+
+	// username长度 (2字节)
+	binary.BigEndian.PutUint16(payload[offset:], uint16(len(usernameBytes))) //nolint:gosec // username is always short
+	offset += 2
+
+	// username内容
+	copy(payload[offset:], usernameBytes)
+	offset += len(usernameBytes)
+
+	// password长度 (2字节)
+	binary.BigEndian.PutUint16(payload[offset:], uint16(len(passwordBytes))) //nolint:gosec // password is always short
+	offset += 2
+
+	// password内容
+	copy(payload[offset:], passwordBytes)
+
+	return PackBinaryMessage(BinaryMsgTypeAuth, payload)
+}
+
+// UnpackAuthMessage 解包认证请求
+func UnpackAuthMessage(data []byte) (clientID, groupID, username, password string, err error) {
+	if len(data) < 8 {
+		return "", "", "", "", fmt.Errorf("auth message too short: %d bytes", len(data))
+	}
+
+	offset := 0
+
+	// 提取 clientID
+	clientIDLen := binary.BigEndian.Uint16(data[offset:])
+	offset += 2
+	if offset+int(clientIDLen) > len(data) {
+		return "", "", "", "", fmt.Errorf("invalid clientID length")
+	}
+	clientID = string(data[offset : offset+int(clientIDLen)])
+	offset += int(clientIDLen)
+
+	// 提取 groupID
+	if offset+2 > len(data) {
+		return "", "", "", "", fmt.Errorf("missing groupID length")
+	}
+	groupIDLen := binary.BigEndian.Uint16(data[offset:])
+	offset += 2
+	if offset+int(groupIDLen) > len(data) {
+		return "", "", "", "", fmt.Errorf("invalid groupID length")
+	}
+	groupID = string(data[offset : offset+int(groupIDLen)])
+	offset += int(groupIDLen)
+
+	// 提取 username
+	if offset+2 > len(data) {
+		return "", "", "", "", fmt.Errorf("missing username length")
+	}
+	usernameLen := binary.BigEndian.Uint16(data[offset:])
+	offset += 2
+	if offset+int(usernameLen) > len(data) {
+		return "", "", "", "", fmt.Errorf("invalid username length")
+	}
+	username = string(data[offset : offset+int(usernameLen)])
+	offset += int(usernameLen)
+
+	// 提取 password
+	if offset+2 > len(data) {
+		return "", "", "", "", fmt.Errorf("missing password length")
+	}
+	passwordLen := binary.BigEndian.Uint16(data[offset:])
+	offset += 2
+	if offset+int(passwordLen) > len(data) {
+		return "", "", "", "", fmt.Errorf("invalid password length")
+	}
+	password = string(data[offset : offset+int(passwordLen)])
+
+	return clientID, groupID, username, password, nil
+}
+
+// --- 认证响应消息 ---
+// 格式: [版本:1][类型:1][status长度:2][status:N][reason长度:2][reason:N]
+
+// PackAuthResponseMessage 打包认证响应
+func PackAuthResponseMessage(status, reason string) []byte {
+	statusBytes := []byte(status)
+	reasonBytes := []byte(reason)
+
+	// 计算总长度
+	totalLen := 2 + len(statusBytes) + 2 + len(reasonBytes)
+	payload := make([]byte, totalLen)
+
+	offset := 0
+
+	// status长度 (2字节)
+	binary.BigEndian.PutUint16(payload[offset:], uint16(len(statusBytes))) //nolint:gosec // status is always short
+	offset += 2
+
+	// status内容
+	copy(payload[offset:], statusBytes)
+	offset += len(statusBytes)
+
+	// reason长度 (2字节)
+	binary.BigEndian.PutUint16(payload[offset:], uint16(len(reasonBytes))) //nolint:gosec // reason is always short
+	offset += 2
+
+	// reason内容
+	copy(payload[offset:], reasonBytes)
+
+	return PackBinaryMessage(BinaryMsgTypeAuthResponse, payload)
+}
+
+// UnpackAuthResponseMessage 解包认证响应
+func UnpackAuthResponseMessage(data []byte) (status, reason string, err error) {
+	if len(data) < 4 {
+		return "", "", fmt.Errorf("auth response too short: %d bytes", len(data))
+	}
+
+	offset := 0
+
+	// 提取 status
+	statusLen := binary.BigEndian.Uint16(data[offset:])
+	offset += 2
+	if offset+int(statusLen) > len(data) {
+		return "", "", fmt.Errorf("invalid status length")
+	}
+	status = string(data[offset : offset+int(statusLen)])
+	offset += int(statusLen)
+
+	// 提取 reason
+	if offset+2 > len(data) {
+		return "", "", fmt.Errorf("missing reason length")
+	}
+	reasonLen := binary.BigEndian.Uint16(data[offset:])
+	offset += 2
+	if offset+int(reasonLen) > len(data) {
+		return "", "", fmt.Errorf("invalid reason length")
+	}
+	reason = string(data[offset : offset+int(reasonLen)])
+
+	return status, reason, nil
 }

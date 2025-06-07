@@ -7,6 +7,10 @@ import (
 	"testing"
 )
 
+const (
+	testConnID = "d115k314nsj2he328ae0" // Test connection ID used in multiple test cases
+)
+
 func TestBinaryProtocol(t *testing.T) {
 	t.Run("Header Packing", func(t *testing.T) {
 		msg := PackBinaryMessage(BinaryMsgTypeData, []byte("test"))
@@ -54,7 +58,7 @@ func TestDataMessage(t *testing.T) {
 	}{
 		{
 			name:   "normal message",
-			connID: "d115k314nsj2he328ae0", // 20 字符的 xid
+			connID: testConnID, // 20 字符的 xid
 			data:   []byte("Hello, World!"),
 		},
 		{
@@ -123,7 +127,7 @@ func TestDataMessage(t *testing.T) {
 }
 
 func TestConnectMessage(t *testing.T) {
-	connID := "d115k314nsj2he328ae0"
+	connID := testConnID
 	network := "tcp"
 	address := "example.com:8080"
 
@@ -166,7 +170,7 @@ func TestConnectResponseMessage(t *testing.T) {
 		success  bool
 		errorMsg string
 	}{
-		{"success", "d115k314nsj2he328ae0", true, ""},
+		{"success", testConnID, true, ""},
 		{"failure", "d115k314nsj2he328ae1", false, "connection refused"},
 		{"long error", "d115k314nsj2he328ae2", false, "Very long error message that describes what went wrong in detail"},
 	}
@@ -203,7 +207,7 @@ func TestConnectResponseMessage(t *testing.T) {
 }
 
 func TestCloseMessage(t *testing.T) {
-	connID := "d115k314nsj2he328ae0"
+	connID := testConnID
 
 	// 打包
 	packed := PackCloseMessage(connID)
@@ -231,7 +235,11 @@ func TestCloseMessage(t *testing.T) {
 
 func TestPortForwardMessage(t *testing.T) {
 	clientID := "test-client-123"
-	ports := []int{8080, 8081, 9000}
+	ports := []PortConfig{
+		{RemotePort: 8080, LocalPort: 8080, LocalHost: "localhost", Protocol: "tcp"},
+		{RemotePort: 8081, LocalPort: 8081, LocalHost: "127.0.0.1", Protocol: "tcp"},
+		{RemotePort: 9000, LocalPort: 9090, LocalHost: "localhost", Protocol: "udp"},
+	}
 
 	// 打包
 	packed := PackPortForwardMessage(clientID, ports)
@@ -294,7 +302,7 @@ func TestPortForwardResponseMessage(t *testing.T) {
 
 // BenchmarkBinaryVsBase64 对比二进制协议和 base64 编码的性能
 func BenchmarkBinaryVsBase64(b *testing.B) {
-	connID := "d115k314nsj2he328ae0"
+	connID := testConnID
 	data := bytes.Repeat([]byte("A"), 1024) // 1KB 数据
 
 	b.Run("Binary Protocol", func(b *testing.B) {
@@ -310,28 +318,19 @@ func BenchmarkBinaryVsBase64(b *testing.B) {
 		b.ReportAllocs()
 	})
 
-	b.Run("JSON + Base64", func(b *testing.B) {
+	b.Run("Base64 Encoding", func(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
-			// 模拟 JSON + base64 编码
+			// 基准测试：base64 编码/解码
 			encoded := base64.StdEncoding.EncodeToString(data)
-			msg := map[string]interface{}{
-				"type": "data",
-				"id":   connID,
-				"data": encoded,
-			}
-
-			// 模拟解码
-			if dataStr, ok := msg["data"].(string); ok {
-				base64.StdEncoding.DecodeString(dataStr)
-			}
+			base64.StdEncoding.DecodeString(encoded)
 		}
 		b.ReportAllocs()
 	})
 }
 
 func BenchmarkMessageTypes(b *testing.B) {
-	connID := "d115k314nsj2he328ae0"
+	connID := testConnID
 	data := bytes.Repeat([]byte("X"), 4096) // 4KB
 
 	benchmarks := []struct {

@@ -3,7 +3,6 @@ package quic
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -211,51 +210,56 @@ func (t *quicTransport) authenticateConnection(stream quic.Stream) (clientID, gr
 		return "", "", fmt.Errorf("authentication timeout")
 	}
 
-	// 解析认证消息
-	var authMsg map[string]interface{}
-	if err = json.Unmarshal(authData, &authMsg); err != nil {
-		return "", "", fmt.Errorf("invalid auth message format: %v", err)
+	// 检查是否是二进制协议消息
+	if !common.IsBinaryMessage(authData) {
+		return "", "", fmt.Errorf("received non-binary auth message")
 	}
 
-	// 检查消息类型
-	msgType, ok := authMsg["type"].(string)
-	if !ok || msgType != "auth" {
-		return "", "", fmt.Errorf("expected auth message, got: %v", msgType)
+	// 解析二进制认证消息
+	version, msgType, data, err := common.UnpackBinaryHeader(authData)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to unpack auth message: %v", err)
 	}
 
-	// 提取客户端信息
-	clientID, ok = authMsg["client_id"].(string)
-	if !ok || clientID == "" {
-		return "", "", fmt.Errorf("missing or invalid client_id")
+	_ = version // 暂时不使用版本号
+
+	if msgType != common.BinaryMsgTypeAuth {
+		return "", "", fmt.Errorf("expected auth message, got: 0x%02x", msgType)
 	}
 
-	groupID, _ = authMsg["group_id"].(string) // 组ID可选
+	// 解包认证消息
+	var username, password string
+	clientID, groupID, username, password, err = common.UnpackAuthMessage(data)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to parse auth message: %v", err)
+	}
+
+	if clientID == "" {
+		return "", "", fmt.Errorf("missing client_id")
+	}
 
 	// 验证认证信息
+	var responseStatus, responseReason string
 	if t.authConfig != nil && t.authConfig.Username != "" {
-		username, ok1 := authMsg["username"].(string)
-		password, ok2 := authMsg["password"].(string)
-
-		if !ok1 || !ok2 {
-			return "", "", fmt.Errorf("missing authentication credentials")
-		}
-
 		if username != t.authConfig.Username || password != t.authConfig.Password {
-			return "", "", fmt.Errorf("invalid credentials")
+			responseStatus = "failed"
+			responseReason = "invalid credentials"
+		} else {
+			responseStatus = "success"
+			logger.Debug("QUIC client authentication successful", "client_id", clientID)
 		}
-
-		logger.Debug("QUIC client authentication successful", "client_id", clientID)
+	} else {
+		responseStatus = "success"
 	}
 
-	// 发送认证成功响应
-	authResponse := map[string]interface{}{
-		"type":   "auth_response",
-		"status": "success",
-	}
-
-	responseData, _ := json.Marshal(authResponse)
-	if writeErr := tempConn.writeData(responseData); writeErr != nil {
+	// 发送认证响应（使用二进制格式）
+	authResponse := common.PackAuthResponseMessage(responseStatus, responseReason)
+	if writeErr := tempConn.writeData(authResponse); writeErr != nil {
 		return "", "", fmt.Errorf("failed to send auth response: %v", writeErr)
+	}
+
+	if responseStatus != "success" {
+		return "", "", fmt.Errorf(responseReason)
 	}
 
 	logger.Debug("QUIC authentication completed successfully", "client_id", clientID, "group_id", groupID)

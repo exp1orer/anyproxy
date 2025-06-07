@@ -150,7 +150,9 @@ func (g *Gateway) Start() error {
 			logger.Error("Failed to start proxy", "index", i, "err", err)
 			// If any proxy fails to start, stop the ones that already started
 			for j := 0; j < i; j++ {
-				g.proxies[j].Stop()
+				if err := g.proxies[j].Stop(); err != nil {
+					logger.Error("Failed to stop proxy during cleanup", "index", j, "err", err)
+				}
 			}
 			return fmt.Errorf("failed to start proxy %d: %v", i, err)
 		}

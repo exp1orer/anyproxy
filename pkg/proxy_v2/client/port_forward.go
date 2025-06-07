@@ -13,22 +13,20 @@ func (c *Client) sendPortForwardingRequest() error {
 
 	logger.Debug("Preparing port forwarding request", "client_id", c.getClientID(), "port_count", len(c.config.OpenPorts))
 
-	// 构建端口列表
-	ports := make([]map[string]interface{}, 0, len(c.config.OpenPorts))
+	// 构建端口配置列表
+	ports := make([]common.PortConfig, 0, len(c.config.OpenPorts))
 	for _, port := range c.config.OpenPorts {
-		ports = append(ports, map[string]interface{}{
-			"remote_port": port.RemotePort,
-			"local_host":  port.LocalHost,
-			"local_port":  port.LocalPort,
-			"protocol":    port.Protocol,
+		ports = append(ports, common.PortConfig{
+			RemotePort: port.RemotePort,
+			LocalPort:  port.LocalPort,
+			LocalHost:  port.LocalHost,
+			Protocol:   port.Protocol,
 		})
 	}
 
-	// 🆕 使用二进制格式发送端口转发请求
-	return c.writeJSONMessage(map[string]interface{}{
-		"type":       common.MsgTypePortForwardReq,
-		"open_ports": ports,
-	})
+	// 使用二进制格式发送端口转发请求
+	binaryMsg := common.PackPortForwardMessage(c.getClientID(), ports)
+	return c.conn.WriteMessage(binaryMsg)
 }
 
 // handlePortForwardResponse 处理端口转发响应 (与 v1 相同)
@@ -40,10 +38,10 @@ func (c *Client) handlePortForwardResponse(msg map[string]interface{}) {
 	}
 
 	if success {
-		logger.Info("✅ Port forwarding setup successful", "client_id", c.getClientID())
+		logger.Info("Port forwarding setup successful", "client_id", c.getClientID())
 	} else {
 		errorMsg, _ := msg["error"].(string)
-		logger.Error("❌ Port forwarding setup failed", "client_id", c.getClientID(), "error", errorMsg)
+		logger.Error("Port forwarding setup failed", "client_id", c.getClientID(), "error", errorMsg)
 	}
 
 	// 记录具体的端口状态（如果有的话）
@@ -53,9 +51,9 @@ func (c *Client) handlePortForwardResponse(msg map[string]interface{}) {
 				port, _ := statusMap["port"].(float64)
 				success, _ := statusMap["success"].(bool)
 				if success {
-					logger.Info("  ✅ Port forwarding active", "port", int(port))
+					logger.Debug("  Port forwarding active", "port", int(port))
 				} else {
-					logger.Error("  ❌ Port forwarding failed", "port", int(port))
+					logger.Error("  Port forwarding failed", "port", int(port))
 				}
 			}
 		}

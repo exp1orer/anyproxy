@@ -1,7 +1,6 @@
 package client
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
@@ -16,17 +15,11 @@ func (c *Client) readNextMessage() (map[string]interface{}, error) {
 	}
 
 	// 检查是否是二进制协议消息
-	if common.IsBinaryMessage(msgData) {
-		return c.parseBinaryMessage(msgData)
+	if !common.IsBinaryMessage(msgData) {
+		return nil, fmt.Errorf("received non-binary message")
 	}
 
-	// 兼容旧的 JSON 格式（可以在未来版本中移除）
-	var msg map[string]interface{}
-	if err := json.Unmarshal(msgData, &msg); err != nil {
-		return nil, fmt.Errorf("invalid message format: %v", err)
-	}
-
-	return msg, nil
+	return c.parseBinaryMessage(msgData)
 }
 
 // parseBinaryMessage 解析二进制消息为兼容的 map 格式
@@ -132,17 +125,4 @@ func (c *Client) writeCloseMessage(connID string) error {
 	binaryMsg := common.PackCloseMessage(connID)
 
 	return c.conn.WriteMessage(binaryMsg)
-}
-
-// writePortForwardRequest 发送端口转发请求，使用二进制格式
-func (c *Client) writePortForwardRequest(clientID string, ports []int) error {
-	// 使用二进制格式
-	binaryMsg := common.PackPortForwardMessage(clientID, ports)
-
-	return c.conn.WriteMessage(binaryMsg)
-}
-
-// writeJSONMessage 发送 JSON 格式的控制消息（已弃用，保留用于兼容）
-func (c *Client) writeJSONMessage(msg map[string]interface{}) error {
-	return c.conn.WriteJSON(msg)
 }

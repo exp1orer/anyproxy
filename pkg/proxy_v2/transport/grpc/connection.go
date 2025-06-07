@@ -2,16 +2,17 @@ package grpc
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/buhuipao/anyproxy/pkg/logger"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
@@ -141,15 +142,6 @@ func (c *grpcConnection) WriteMessage(data []byte) error {
 	return c.writeMessageAsync(StreamMessage_DATA, data)
 }
 
-// WriteJSON implements transport.Connection
-func (c *grpcConnection) WriteJSON(v interface{}) error {
-	data, err := json.Marshal(v)
-	if err != nil {
-		return fmt.Errorf("marshal JSON: %v", err)
-	}
-	return c.writeMessageAsync(StreamMessage_JSON, data)
-}
-
 // 🆕 异步写入方法，无锁设计
 func (c *grpcConnection) writeMessageAsync(msgType StreamMessage_MessageType, data []byte) error {
 	if c.closed {
@@ -172,7 +164,13 @@ func (c *grpcConnection) writeMessageAsync(msgType StreamMessage_MessageType, da
 		case <-c.ctx.Done():
 			// 🆕 确保 errChan 不泄漏
 			go func() {
-				<-errChan // 消费可能的错误
+				select {
+				case <-errChan:
+					// 成功消费错误
+				case <-time.After(5 * time.Second):
+					// 超时后退出，防止永久阻塞
+					logger.Warn("Timeout waiting for write error channel", "client_id", c.clientID)
+				}
 			}()
 			return c.ctx.Err()
 		}
@@ -193,15 +191,6 @@ func (c *grpcConnection) ReadMessage() ([]byte, error) {
 	case <-c.ctx.Done():
 		return nil, c.ctx.Err()
 	}
-}
-
-// 🆕 ReadJSON 读取并解析 JSON 消息
-func (c *grpcConnection) ReadJSON(v interface{}) error {
-	data, err := c.ReadMessage()
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, v)
 }
 
 // Close implements transport.Connection

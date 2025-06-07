@@ -55,12 +55,12 @@ func (c *Client) isConnectionAllowed(address string) bool {
 	// 检查是否在允许列表中
 	for _, re := range c.allowedHostsRe {
 		if re.MatchString(address) {
-			logger.Debug("✅ Connection allowed - matches allowed pattern", "client_id", c.getClientID(), "address", address, "pattern", re.String())
+			logger.Debug("Connection allowed - matches allowed pattern", "client_id", c.getClientID(), "address", address, "pattern", re.String())
 			return true
 		}
 	}
 
-	logger.Warn("⚠️ CONNECTION BLOCKED - Not in allowed hosts", "client_id", c.getClientID(), "address", address, "action", "Connection rejected - host not in allowed list")
+	logger.Warn("Connection blocked - not in allowed hosts", "client_id", c.getClientID(), "address", address, "action", "Connection rejected - host not in allowed list")
 	return false
 }
 

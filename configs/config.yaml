@@ -21,7 +21,7 @@ proxy:
     auth_password: "password"
 
 transport:
-  type: "websocket"
+  type: "grpc"
 
 gateway:
   listen_addr: ":8443"
@@ -35,7 +35,7 @@ client:
   gateway_tls_cert: "certs/server.crt"
   client_id: "client"
   # group_id: "example-group"
-  replicas: 10
+  replicas: 1
   auth_username: "gateway_user"
   auth_password: "gateway_password"
   forbidden_hosts:

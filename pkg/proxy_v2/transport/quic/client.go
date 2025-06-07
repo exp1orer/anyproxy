@@ -4,13 +4,13 @@ package quic
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/quic-go/quic-go"
 
 	"github.com/buhuipao/anyproxy/pkg/logger"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
@@ -87,24 +87,8 @@ func (t *quicTransport) dialQUICWithConfig(addr string, config *transport.Client
 func (t *quicTransport) authenticateClient(stream quic.Stream, config *transport.ClientConfig) error {
 	logger.Debug("Starting QUIC client authentication", "client_id", config.ClientID, "group_id", config.GroupID)
 
-	// Create authentication message
-	authMsg := map[string]interface{}{
-		"type":      "auth",
-		"client_id": config.ClientID,
-		"group_id":  config.GroupID,
-	}
-
-	// Add authentication credentials (if provided)
-	if config.Username != "" {
-		authMsg["username"] = config.Username
-		authMsg["password"] = config.Password
-	}
-
-	// Serialize authentication message
-	authData, err := json.Marshal(authMsg)
-	if err != nil {
-		return fmt.Errorf("failed to marshal auth message: %v", err)
-	}
+	// Create authentication message using binary protocol
+	authData := common.PackAuthMessage(config.ClientID, config.GroupID, config.Username, config.Password)
 
 	// Create temporary connection to send authentication message
 	ctx, cancel := context.WithCancel(context.Background())
@@ -155,27 +139,35 @@ func (t *quicTransport) authenticateClient(stream quic.Stream, config *transport
 	select {
 	case responseData = <-tempConn.readChan:
 		// Successfully received response
-	case err = <-tempConn.errorChan:
+	case err := <-tempConn.errorChan:
 		return fmt.Errorf("failed to read auth response: %v", err)
 	case <-timeout:
 		return fmt.Errorf("authentication response timeout")
 	}
 
-	// Parse authentication response
-	var authResponse map[string]interface{}
-	if err := json.Unmarshal(responseData, &authResponse); err != nil {
-		return fmt.Errorf("invalid auth response format: %v", err)
+	// Check if response is binary protocol
+	if !common.IsBinaryMessage(responseData) {
+		return fmt.Errorf("received non-binary auth response")
 	}
 
-	// Check response type and status
-	msgType, ok := authResponse["type"].(string)
-	if !ok || msgType != "auth_response" {
-		return fmt.Errorf("unexpected response type: %v", msgType)
+	// Parse binary authentication response
+	version, msgType, data, err := common.UnpackBinaryHeader(responseData)
+	if err != nil {
+		return fmt.Errorf("failed to unpack auth response: %v", err)
 	}
 
-	status, ok := authResponse["status"].(string)
-	if !ok || status != "success" {
-		reason, _ := authResponse["reason"].(string)
+	_ = version // 暂时不使用版本号
+
+	if msgType != common.BinaryMsgTypeAuthResponse {
+		return fmt.Errorf("unexpected message type: 0x%02x", msgType)
+	}
+
+	status, reason, err := common.UnpackAuthResponseMessage(data)
+	if err != nil {
+		return fmt.Errorf("failed to parse auth response: %v", err)
+	}
+
+	if status != "success" {
 		if reason == "" {
 			reason = "unknown"
 		}

@@ -24,7 +24,7 @@ func (c *Client) handleMessages() {
 		default:
 		}
 
-		// 🆕 读取消息（支持二进制和 JSON）
+		// 🆕 读取消息（使用二进制格式）
 		msg, err := c.readNextMessage()
 		if err != nil {
 			logger.Error("Transport read error", "client_id", c.getClientID(), "messages_processed", messageCount, "err", err)
@@ -50,7 +50,7 @@ func (c *Client) handleMessages() {
 		case common.MsgTypeConnect, common.MsgTypeData, common.MsgTypeClose:
 			// 将所有消息路由到每个连接的通道 (与 v1 相同)
 			c.routeMessage(msg)
-		case "port_forward_response":
+		case common.MsgTypePortForwardResp:
 			// 直接处理端口转发响应 (与 v1 相同)
 			logger.Debug("Received port forwarding response", "client_id", c.getClientID())
 			c.handlePortForwardResponse(msg)
@@ -195,7 +195,7 @@ func (c *Client) handleConnectMessage(msg map[string]interface{}) {
 	// Check if the connection is allowed
 	if !c.isConnectionAllowed(address) {
 		errorMsg := fmt.Sprintf("Connection denied - host '%s' is forbidden", address)
-		logger.Error("❌ CONNECTION REJECTED - FORBIDDEN HOST", "client_id", c.getClientID(), "conn_id", connID, "address", address, "reason", "Host is in forbidden list or not in allowed list", "allowed_hosts", c.config.AllowedHosts, "forbidden_hosts", c.config.ForbiddenHosts)
+		logger.Error("Connection rejected - forbidden host", "client_id", c.getClientID(), "conn_id", connID, "address", address, "reason", "Host is in forbidden list or not in allowed list", "allowed_hosts", c.config.AllowedHosts, "forbidden_hosts", c.config.ForbiddenHosts)
 
 		if err := c.sendConnectResponse(connID, false, errorMsg); err != nil {
 			logger.Error("Failed to send connect response for forbidden host", "client_id", c.getClientID(), "conn_id", connID, "err", err)

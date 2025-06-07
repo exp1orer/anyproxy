@@ -25,12 +25,10 @@ type Transport interface {
 
 // Connection 连接接口 - 简化的连接抽象
 type Connection interface {
-	// 写入消息（JSON 或 字节数据）
+	// 写入消息（二进制数据）
 	WriteMessage(data []byte) error
-	WriteJSON(v interface{}) error
 	// 读取消息
 	ReadMessage() ([]byte, error)
-	ReadJSON(v interface{}) error
 	// 连接管理
 	Close() error
 	RemoteAddr() net.Addr

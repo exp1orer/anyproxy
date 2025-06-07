@@ -30,8 +30,8 @@ func NewConnWrapper(conn net.Conn, network, remoteAddress string) *ConnWrapper {
 	if host, port, err := net.SplitHostPort(remoteAddress); err == nil {
 		if ip := net.ParseIP(host); ip != nil {
 			switch network {
-			case "tcp":
-				if portNum, err := net.LookupPort("tcp", port); err == nil {
+			case ProtocolTCP:
+				if portNum, err := net.LookupPort(ProtocolTCP, port); err == nil {
 					remoteAddr = &net.TCPAddr{IP: ip, Port: portNum}
 				}
 			case "udp":
@@ -44,7 +44,7 @@ func NewConnWrapper(conn net.Conn, network, remoteAddress string) *ConnWrapper {
 
 	// Fallback to a default remote address if parsing failed
 	if remoteAddr == nil {
-		if network == "tcp" {
+		if network == ProtocolTCP {
 			remoteAddr = &net.TCPAddr{
 				IP:   net.IPv4(127, 0, 0, 1),
 				Port: 80,

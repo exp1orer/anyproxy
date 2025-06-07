@@ -26,7 +26,6 @@ type StreamMessage_MessageType int32
 
 const (
 	StreamMessage_DATA    StreamMessage_MessageType = 0 // Raw data message
-	StreamMessage_JSON    StreamMessage_MessageType = 1 // JSON message
 	StreamMessage_CONTROL StreamMessage_MessageType = 2 // Control message
 )
 
@@ -34,12 +33,10 @@ const (
 var (
 	StreamMessage_MessageType_name = map[int32]string{
 		0: "DATA",
-		1: "JSON",
 		2: "CONTROL",
 	}
 	StreamMessage_MessageType_value = map[string]int32{
 		"DATA":    0,
-		"JSON":    1,
 		"CONTROL": 2,
 	}
 )
@@ -222,7 +219,7 @@ var File_pkg_proxy_v2_transport_grpc_transport_proto protoreflect.FileDescriptor
 
 const file_pkg_proxy_v2_transport_grpc_transport_proto_rawDesc = "" +
 	"\n" +
-	"+pkg/proxy_v2/transport/grpc/transport.proto\x12\ttransport\"\xc6\x02\n" +
+	"+pkg/proxy_v2/transport/grpc/transport.proto\x12\ttransport\"\xbc\x02\n" +
 	"\rStreamMessage\x128\n" +
 	"\x04type\x18\x01 \x01(\x0e2$.transport.StreamMessage.MessageTypeR\x04type\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x1b\n" +
@@ -231,10 +228,9 @@ const file_pkg_proxy_v2_transport_grpc_transport_proto_rawDesc = "" +
 	"\bmetadata\x18\x05 \x03(\v2&.transport.StreamMessage.MetadataEntryR\bmetadata\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\".\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"$\n" +
 	"\vMessageType\x12\b\n" +
-	"\x04DATA\x10\x00\x12\b\n" +
-	"\x04JSON\x10\x01\x12\v\n" +
+	"\x04DATA\x10\x00\x12\v\n" +
 	"\aCONTROL\x10\x02\"|\n" +
 	"\n" +
 	"ClientInfo\x12\x1b\n" +

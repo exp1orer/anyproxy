@@ -38,7 +38,8 @@ func (c *Client) connectionLoop() {
 			logger.Error("Failed to connect to gateway", "client_id", c.getClientID(), "attempt", connectionAttempts, "err", err, "retrying_in", backoff)
 
 			// 添加抖动避免雷鸣群问题
-			jitter := time.Duration(rand.Int63n(int64(backoff) / 4))
+			// 使用 math/rand 是有意为之，这里不需要加密安全的随机数
+			jitter := time.Duration(rand.Int63n(int64(backoff) / 4)) //nolint:gosec // jitter doesn't require crypto rand
 			sleepTime := backoff + jitter
 
 			// 等待重试 (与 v1 相同)
@@ -82,6 +83,8 @@ func (c *Client) connectionLoop() {
 func (c *Client) connect() error {
 	logger.Debug("Establishing connection to gateway", "client_id", c.getClientID(), "gateway_addr", c.config.GatewayAddr)
 
+	c.actualID = c.generateClientID()
+
 	// 🆕 创建 TLS 配置 (从 v1 迁移)
 	var tlsConfig *tls.Config
 	if c.config.GatewayTLSCert != "" || strings.HasPrefix(c.config.GatewayAddr, "wss://") {
@@ -116,7 +119,6 @@ func (c *Client) connect() error {
 	}
 
 	c.conn = conn
-	c.actualID = c.actualID // 🆕 保存实际使用的客户端 ID
 	logger.Info("Transport connection established successfully", "client_id", c.actualID, "group_id", c.config.GroupID, "remote_addr", conn.RemoteAddr())
 
 	// 发送端口转发请求 (与 v1 相同)

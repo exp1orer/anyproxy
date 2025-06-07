@@ -44,20 +44,20 @@ func NewClient(cfg *config.ClientConfig, transportType string, replicaIdx int) (
 
 	// 记录安全策略详细信息
 	if len(cfg.ForbiddenHosts) > 0 {
-		logger.Info("🚫 SECURITY POLICY - Forbidden hosts configured", "client_id", cfg.ClientID, "forbidden_hosts", cfg.ForbiddenHosts, "count", len(cfg.ForbiddenHosts))
+		logger.Info("Security policy: forbidden hosts configured", "client_id", cfg.ClientID, "forbidden_hosts", cfg.ForbiddenHosts, "count", len(cfg.ForbiddenHosts))
 	}
 
 	if len(cfg.AllowedHosts) > 0 {
-		logger.Info("✅ SECURITY POLICY - Allowed hosts configured", "client_id", cfg.ClientID, "allowed_hosts", cfg.AllowedHosts, "count", len(cfg.AllowedHosts))
+		logger.Info("Security policy: allowed hosts configured", "client_id", cfg.ClientID, "allowed_hosts", cfg.AllowedHosts, "count", len(cfg.AllowedHosts))
 	} else {
-		logger.Warn("⚠️ SECURITY POLICY - No allowed hosts configured, all non-forbidden hosts will be allowed", "client_id", cfg.ClientID)
+		logger.Warn("Security policy: no allowed hosts configured, all non-forbidden hosts will be allowed", "client_id", cfg.ClientID)
 	}
 
 	// 记录端口转发配置
 	if len(cfg.OpenPorts) > 0 {
-		logger.Info("🔌 PORT FORWARDING - Configured ports", "client_id", cfg.ClientID, "port_count", len(cfg.OpenPorts))
+		logger.Info("Port forwarding configured", "client_id", cfg.ClientID, "port_count", len(cfg.OpenPorts))
 		for i, port := range cfg.OpenPorts {
-			logger.Info("  Port forwarding entry", "index", i, "remote_port", port.RemotePort, "local_target", fmt.Sprintf("%s:%d", port.LocalHost, port.LocalPort), "protocol", port.Protocol)
+			logger.Debug("  Port forwarding entry", "index", i, "remote_port", port.RemotePort, "local_target", fmt.Sprintf("%s:%d", port.LocalHost, port.LocalPort), "protocol", port.Protocol)
 		}
 	}
 
@@ -84,7 +84,6 @@ func NewClient(cfg *config.ClientConfig, transportType string, replicaIdx int) (
 		ctx:        ctx,
 		cancel:     cancel,
 	}
-	client.actualID = client.generateClientID()
 
 	// 修复：预编译正则表达式以提高性能
 	if err := client.compileHostPatterns(); err != nil {

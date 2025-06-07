@@ -128,7 +128,7 @@ func (c *ClientConn) dialNetwork(ctx context.Context, network, addr string) (net
 		connID = common.GenerateConnID()
 		logger.Debug("Generated new connection ID", "client_id", c.ID, "conn_id", connID)
 		// 将 connID 添加到 context 中，供后续组件使用
-		ctx = common.WithConnID(ctx, connID)
+		ctx = common.WithConnID(ctx, connID) //nolint:staticcheck // ctx will be used in future versions
 	}
 
 	logger.Debug("Creating new network connection", "client_id", c.ID, "conn_id", connID, "network", network, "address", addr)
@@ -188,7 +188,7 @@ func (c *ClientConn) handleMessage() {
 		default:
 		}
 
-		// 🆕 读取消息（支持二进制和 JSON）
+		// 🆕 读取消息（使用二进制格式）
 		msg, err := c.readNextMessage()
 		if err != nil {
 			logger.Error("Transport read error", "client_id", c.ID, "messages_processed", messageCount, "err", err)
@@ -479,11 +479,11 @@ func (c *ClientConn) handleConnectResponseMessage(msg map[string]interface{}) {
 
 		// 根据错误类型使用不同的日志级别和格式
 		if strings.Contains(strings.ToLower(errorMsg), "forbidden") || strings.Contains(strings.ToLower(errorMsg), "denied") {
-			logger.Error("❌ CONNECTION BLOCKED BY CLIENT SECURITY POLICY", "client_id", c.ID, "conn_id", connID, "error", errorMsg, "action", "Connection rejected by client due to security policy")
+			logger.Error("Connection blocked by client security policy", "client_id", c.ID, "conn_id", connID, "error", errorMsg, "action", "Connection rejected by client due to security policy")
 		} else if strings.Contains(strings.ToLower(errorMsg), "timeout") {
-			logger.Warn("⏱️ CONNECTION TIMEOUT", "client_id", c.ID, "conn_id", connID, "error", errorMsg, "action", "Connection timed out")
+			logger.Warn("Connection timeout", "client_id", c.ID, "conn_id", connID, "error", errorMsg, "action", "Connection timed out")
 		} else {
-			logger.Error("❗ CONNECTION FAILED", "client_id", c.ID, "conn_id", connID, "error", errorMsg, "action", "Client failed to establish connection")
+			logger.Error("Connection failed", "client_id", c.ID, "conn_id", connID, "error", errorMsg, "action", "Client failed to establish connection")
 		}
 
 		c.closeConnection(connID)
@@ -616,15 +616,27 @@ func (c *ClientConn) handlePortForwardRequest(msg map[string]interface{}) {
 		}
 
 		// Extract port configuration
-		remotePort, ok := portMap["remote_port"].(float64) // JSON numbers are float64
-		if !ok {
-			logger.Error("Invalid remote_port", "client_id", c.ID)
+		var remotePort, localPort int
+
+		// Handle both int and float64 types for remote_port
+		switch v := portMap["remote_port"].(type) {
+		case int:
+			remotePort = v
+		case float64:
+			remotePort = int(v)
+		default:
+			logger.Error("Invalid remote_port type", "client_id", c.ID, "type", fmt.Sprintf("%T", v))
 			continue
 		}
 
-		localPort, ok := portMap["local_port"].(float64)
-		if !ok {
-			logger.Error("Invalid local_port", "client_id", c.ID)
+		// Handle both int and float64 types for local_port
+		switch v := portMap["local_port"].(type) {
+		case int:
+			localPort = v
+		case float64:
+			localPort = int(v)
+		default:
+			logger.Error("Invalid local_port type", "client_id", c.ID, "type", fmt.Sprintf("%T", v))
 			continue
 		}
 
@@ -640,8 +652,8 @@ func (c *ClientConn) handlePortForwardRequest(msg map[string]interface{}) {
 		}
 
 		openPorts = append(openPorts, config.OpenPort{
-			RemotePort: int(remotePort),
-			LocalPort:  int(localPort),
+			RemotePort: remotePort,
+			LocalPort:  localPort,
 			LocalHost:  localHost,
 			Protocol:   protocol,
 		})
@@ -667,13 +679,17 @@ func (c *ClientConn) handlePortForwardRequest(msg map[string]interface{}) {
 
 // sendPortForwardResponse 发送端口转发响应 (适配传输层)
 func (c *ClientConn) sendPortForwardResponse(success bool, message string) {
-	response := map[string]interface{}{
-		"type":    "port_forward_response",
-		"success": success,
-		"message": message,
+	// 使用二进制格式发送响应
+	var errorMsg string
+	if !success {
+		errorMsg = message
 	}
 
-	if err := c.writeJSONMessage(response); err != nil {
+	// 创建状态列表（简化版本，只包含成功状态）
+	var statuses []common.PortForwardStatus
+
+	binaryMsg := common.PackPortForwardResponseMessage(success, errorMsg, statuses)
+	if err := c.Conn.WriteMessage(binaryMsg); err != nil {
 		logger.Error("Failed to send port forward response", "client_id", c.ID, "err", err)
 	}
 }

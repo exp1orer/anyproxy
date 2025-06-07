@@ -15,7 +15,6 @@ message StreamMessage {
     // Message type
     enum MessageType {
         DATA = 0;      // Raw data message
-        JSON = 1;      // JSON message
         CONTROL = 2;   // Control message
     }
     

@@ -1,7 +1,6 @@
 package websocket
 
 import (
-	"encoding/json"
 	"net"
 
 	"github.com/gorilla/websocket"
@@ -42,28 +41,15 @@ func NewWebSocketConnectionWithInfo(conn *websocket.Conn, clientID, groupID stri
 	}
 }
 
-// WriteMessage 异步写入二进制消息 (🆕 使用高性能 writer)
+// WriteMessage implements transport.Connection
 func (c *webSocketConnectionWithInfo) WriteMessage(data []byte) error {
 	return c.writer.WriteMessage(data)
 }
 
-// WriteJSON 异步写入 JSON 消息 (🆕 使用高性能 writer)
-func (c *webSocketConnectionWithInfo) WriteJSON(v interface{}) error {
-	return c.writer.WriteJSON(v)
-}
-
+// ReadMessage implements transport.Connection
 func (c *webSocketConnectionWithInfo) ReadMessage() ([]byte, error) {
 	_, data, err := c.conn.ReadMessage()
 	return data, err
-}
-
-// 🆕 ReadJSON 读取并解析 JSON 消息
-func (c *webSocketConnectionWithInfo) ReadJSON(v interface{}) error {
-	data, err := c.ReadMessage()
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(data, v)
 }
 
 // Close 优雅关闭连接 (🆕 使用高性能 writer 的优雅停止)
