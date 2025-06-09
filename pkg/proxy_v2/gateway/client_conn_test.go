@@ -10,7 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/message"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
 )
 
 // mockNetConn implements net.Conn for testing
@@ -75,12 +76,12 @@ func (m *mockNetConn) SetWriteDeadline(t time.Time) error {
 
 // Create a test ClientConn
 func createTestClientConn() (*ClientConn, *mockConnectionExt) {
-	ctx, cancel := context.WithCancel(context.Background())
 	mockConn := &mockConnectionExt{
 		clientID: "test-client",
 		groupID:  "test-group",
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
 	client := &ClientConn{
 		ID:             "test-client",
 		GroupID:        "test-group",
@@ -91,6 +92,8 @@ func createTestClientConn() (*ClientConn, *mockConnectionExt) {
 		cancel:         cancel,
 		portForwardMgr: NewPortForwardManager(),
 	}
+	// Initialize msgHandler
+	client.msgHandler = message.NewGatewayExtendedMessageHandler(mockConn)
 
 	return client, mockConn
 }
@@ -132,7 +135,7 @@ func TestClientConn_DialNetwork(t *testing.T) {
 	// Set up mock to return successful connect response
 	mockConn.messages = []map[string]interface{}{
 		{
-			"type":    common.MsgTypeConnectResponse,
+			"type":    protocol.MsgTypeConnectResponse,
 			"id":      "", // Will be set by the actual request
 			"success": true,
 		},
@@ -148,10 +151,10 @@ func TestClientConn_DialNetwork(t *testing.T) {
 	// Create a mock dialer that tracks the connection ID
 	mockConn.writeMessageFunc = func(data []byte) error {
 		// Parse the binary connect message to get the connection ID
-		if common.IsBinaryMessage(data) {
-			_, msgType, payload, err := common.UnpackBinaryHeader(data)
-			if err == nil && msgType == common.BinaryMsgTypeConnect {
-				connID, _, _, err := common.UnpackConnectMessage(payload)
+		if protocol.IsBinaryMessage(data) {
+			_, msgType, payload, err := protocol.UnpackBinaryHeader(data)
+			if err == nil && msgType == protocol.BinaryMsgTypeConnect {
+				connID, _, _, err := protocol.UnpackConnectMessage(payload)
 				if err == nil {
 					// Update the response message with the correct ID
 					mockConn.messages[0]["id"] = connID
@@ -190,7 +193,7 @@ func TestClientConn_HandleMessage(t *testing.T) {
 			name: "handle connect response",
 			messages: []map[string]interface{}{
 				{
-					"type":    common.MsgTypeConnectResponse,
+					"type":    protocol.MsgTypeConnectResponse,
 					"id":      "conn1",
 					"success": true,
 				},
@@ -208,7 +211,7 @@ func TestClientConn_HandleMessage(t *testing.T) {
 			name: "handle data message",
 			messages: []map[string]interface{}{
 				{
-					"type": common.MsgTypeData,
+					"type": protocol.MsgTypeData,
 					"id":   "conn1",
 					"data": base64.StdEncoding.EncodeToString([]byte("test data")),
 				},
@@ -230,7 +233,7 @@ func TestClientConn_HandleMessage(t *testing.T) {
 			name: "handle close message",
 			messages: []map[string]interface{}{
 				{
-					"type": common.MsgTypeClose,
+					"type": protocol.MsgTypeClose,
 					"id":   "conn1",
 				},
 			},
@@ -263,7 +266,7 @@ func TestClientConn_HandleMessage(t *testing.T) {
 			name: "handle port forward request",
 			messages: []map[string]interface{}{
 				{
-					"type": common.MsgTypePortForwardReq,
+					"type": protocol.MsgTypePortForwardReq,
 					"open_ports": []interface{}{
 						map[string]interface{}{
 							"remote_port": float64(8080),
@@ -363,7 +366,7 @@ func TestClientConn_RouteMessage(t *testing.T) {
 		{
 			name: "route to existing channel",
 			msg: map[string]interface{}{
-				"type": common.MsgTypeData,
+				"type": protocol.MsgTypeData,
 				"id":   "conn1",
 				"data": "test",
 			},
@@ -375,7 +378,7 @@ func TestClientConn_RouteMessage(t *testing.T) {
 		{
 			name: "create channel for connect response",
 			msg: map[string]interface{}{
-				"type": common.MsgTypeConnectResponse,
+				"type": protocol.MsgTypeConnectResponse,
 				"id":   "conn2",
 			},
 			setup:   func() {},
@@ -384,7 +387,7 @@ func TestClientConn_RouteMessage(t *testing.T) {
 		{
 			name: "route to non-existent channel",
 			msg: map[string]interface{}{
-				"type": common.MsgTypeData,
+				"type": protocol.MsgTypeData,
 				"id":   "conn3",
 			},
 			setup:   func() {},
@@ -393,7 +396,7 @@ func TestClientConn_RouteMessage(t *testing.T) {
 		{
 			name: "message without connection ID",
 			msg: map[string]interface{}{
-				"type": common.MsgTypeData,
+				"type": protocol.MsgTypeData,
 			},
 			setup:   func() {},
 			wantErr: false, // Should be ignored with error log
@@ -414,7 +417,7 @@ func TestClientConn_RouteMessage(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 
 			// Verify channel creation for connect_response
-			if tt.msg["type"] == common.MsgTypeConnectResponse {
+			if tt.msg["type"] == protocol.MsgTypeConnectResponse {
 				if _, exists := client.msgChans[tt.msg["id"].(string)]; !exists {
 					t.Error("Channel should have been created for connect_response")
 				}
@@ -618,12 +621,12 @@ func (m *mockConnectionExt) ReadMessage() ([]byte, error) {
 		// Convert message to binary format based on type
 		msgType, _ := msg["type"].(string)
 		switch msgType {
-		case common.MsgTypeConnectResponse:
+		case protocol.MsgTypeConnectResponse:
 			connID, _ := msg["id"].(string)
 			success, _ := msg["success"].(bool)
 			errorMsg, _ := msg["error"].(string)
-			return common.PackConnectResponseMessage(connID, success, errorMsg), nil
-		case common.MsgTypeData:
+			return protocol.PackConnectResponseMessage(connID, success, errorMsg), nil
+		case protocol.MsgTypeData:
 			connID, _ := msg["id"].(string)
 			var data []byte
 			if dataStr, ok := msg["data"].(string); ok {
@@ -631,28 +634,28 @@ func (m *mockConnectionExt) ReadMessage() ([]byte, error) {
 			} else if dataBytes, ok := msg["data"].([]byte); ok {
 				data = dataBytes
 			}
-			return common.PackDataMessage(connID, data), nil
-		case common.MsgTypeClose:
+			return protocol.PackDataMessage(connID, data), nil
+		case protocol.MsgTypeClose:
 			connID, _ := msg["id"].(string)
-			return common.PackCloseMessage(connID), nil
-		case common.MsgTypePortForwardReq:
+			return protocol.PackCloseMessage(connID), nil
+		case protocol.MsgTypePortForwardReq:
 			clientID, _ := msg["client_id"].(string)
 			openPortsInterface, _ := msg["open_ports"].([]interface{})
-			var ports []common.PortConfig
+			var ports []protocol.PortConfig
 			for _, portInterface := range openPortsInterface {
 				portMap, _ := portInterface.(map[string]interface{})
 				remotePort, _ := portMap["remote_port"].(float64)
 				localPort, _ := portMap["local_port"].(float64)
 				localHost, _ := portMap["local_host"].(string)
-				protocol, _ := portMap["protocol"].(string)
-				ports = append(ports, common.PortConfig{
+				proto, _ := portMap["protocol"].(string)
+				ports = append(ports, protocol.PortConfig{
 					RemotePort: int(remotePort),
 					LocalPort:  int(localPort),
 					LocalHost:  localHost,
-					Protocol:   protocol,
+					Protocol:   proto,
 				})
 			}
-			return common.PackPortForwardMessage(clientID, ports), nil
+			return protocol.PackPortForwardMessage(clientID, ports), nil
 		default:
 			// Return an empty binary message for unknown types
 			return []byte{0xAB, 0xCD, 0xFF, 0x00, 0x00, 0x00, 0x00}, nil

@@ -10,7 +10,7 @@ import (
 	"github.com/quic-go/quic-go"
 
 	"github.com/buhuipao/anyproxy/pkg/logger"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
@@ -88,7 +88,7 @@ func (t *quicTransport) authenticateClient(stream quic.Stream, config *transport
 	logger.Debug("Starting QUIC client authentication", "client_id", config.ClientID, "group_id", config.GroupID)
 
 	// Create authentication message using binary protocol
-	authData := common.PackAuthMessage(config.ClientID, config.GroupID, config.Username, config.Password)
+	authData := protocol.PackAuthMessage(config.ClientID, config.GroupID, config.Username, config.Password)
 
 	// Create temporary connection to send authentication message
 	ctx, cancel := context.WithCancel(context.Background())
@@ -146,23 +146,23 @@ func (t *quicTransport) authenticateClient(stream quic.Stream, config *transport
 	}
 
 	// Check if response is binary protocol
-	if !common.IsBinaryMessage(responseData) {
+	if !protocol.IsBinaryMessage(responseData) {
 		return fmt.Errorf("received non-binary auth response")
 	}
 
 	// Parse binary authentication response
-	version, msgType, data, err := common.UnpackBinaryHeader(responseData)
+	version, msgType, data, err := protocol.UnpackBinaryHeader(responseData)
 	if err != nil {
 		return fmt.Errorf("failed to unpack auth response: %v", err)
 	}
 
 	_ = version // 暂时不使用版本号
 
-	if msgType != common.BinaryMsgTypeAuthResponse {
+	if msgType != protocol.BinaryMsgTypeAuthResponse {
 		return fmt.Errorf("unexpected message type: 0x%02x", msgType)
 	}
 
-	status, reason, err := common.UnpackAuthResponseMessage(data)
+	status, reason, err := protocol.UnpackAuthResponseMessage(data)
 	if err != nil {
 		return fmt.Errorf("failed to parse auth response: %v", err)
 	}

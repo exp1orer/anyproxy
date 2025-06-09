@@ -4,14 +4,16 @@ package client
 import (
 	"context"
 	"fmt"
-	"net"
 	"regexp"
 	"sync"
 	"time"
 
 	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/buhuipao/anyproxy/pkg/logger"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/connection"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/message"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/monitoring"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 
 	// Import gRPC transport for side effects (registration)
@@ -20,20 +22,22 @@ import (
 	_ "github.com/buhuipao/anyproxy/pkg/proxy_v2/transport/websocket"
 )
 
-// Client represents the proxy client (基于 v1 设计)
+// Client 客户端结构 (基于 v1，但使用传输层抽象)
 type Client struct {
-	config           *config.ClientConfig
-	transport        transport.Transport  // 🆕 唯一的新增抽象
-	conn             transport.Connection // 🆕 传输层连接
-	actualID         string               // 🆕 实际使用的客户端 ID (带随机后缀)
-	replicaIdx       int                  // 修复：副本索引，用于生成唯一 ID
-	connsMu          sync.RWMutex
-	conns            map[string]net.Conn
-	msgChans         map[string]chan map[string]interface{} // 与 v1 相同的消息通道
-	msgChansMu       sync.RWMutex
-	ctx              context.Context
-	cancel           context.CancelFunc
-	wg               sync.WaitGroup
+	ctx        context.Context
+	cancel     context.CancelFunc
+	config     *config.ClientConfig
+	conn       transport.Connection          // 🆕 使用传输层连接
+	transport  transport.Transport           // 🆕 传输层实例
+	connMgr    *connection.ConnectionManager // 🆕 使用公共连接管理器
+	wg         sync.WaitGroup
+	actualID   string
+	replicaIdx int
+
+	// 🆕 公共消息处理器
+	msgHandler message.ExtendedMessageHandler
+
+	// 修复：预编译的正则表达式，避免在每次请求时重新编译
 	forbiddenHostsRe []*regexp.Regexp // 修复：预编译的禁止主机正则表达式
 	allowedHostsRe   []*regexp.Regexp // 修复：预编译的允许主机正则表达式
 }
@@ -78,11 +82,11 @@ func NewClient(cfg *config.ClientConfig, transportType string, replicaIdx int) (
 	client := &Client{
 		config:     cfg,
 		transport:  transportImpl,
-		replicaIdx: replicaIdx, // 修复：设置副本索引
-		conns:      make(map[string]net.Conn),
-		msgChans:   make(map[string]chan map[string]interface{}),
+		replicaIdx: replicaIdx,                                    // 修复：设置副本索引
+		connMgr:    connection.NewConnectionManager(cfg.ClientID), // 传递客户端ID
 		ctx:        ctx,
 		cancel:     cancel,
+		// 正则表达式将在 compileHostPatterns 中初始化
 	}
 
 	// 修复：预编译正则表达式以提高性能
@@ -90,6 +94,8 @@ func NewClient(cfg *config.ClientConfig, transportType string, replicaIdx int) (
 		cancel()
 		return nil, fmt.Errorf("failed to compile host patterns: %v", err)
 	}
+
+	logger.Debug("Created client with compiled host patterns", "id", cfg.ClientID, "forbidden_patterns", len(client.forbiddenHostsRe), "allowed_patterns", len(client.allowedHostsRe))
 
 	logger.Debug("Client initialization completed", "client_id", cfg.ClientID, "transport_type", transportType)
 
@@ -101,7 +107,7 @@ func (c *Client) Start() error {
 	logger.Info("Starting proxy client", "client_id", c.getClientID(), "gateway_addr", c.config.GatewayAddr, "group_id", c.config.GroupID)
 
 	// 启动性能指标报告器（每30秒报告一次）
-	common.StartMetricsReporter(30 * time.Second)
+	monitoring.StartMetricsReporter(30 * time.Second)
 
 	// 启动主连接循环 (与 v1 相同)
 	c.wg.Add(1)
@@ -117,16 +123,14 @@ func (c *Client) Start() error {
 
 // Stop stops the client gracefully (与 v1 相同)
 func (c *Client) Stop() error {
-	logger.Info("Initiating graceful client shutdown", "client_id", c.getClientID())
+	logger.Info("Initiating graceful client stop", "client_id", c.getClientID())
 
 	// Step 1: 取消上下文 (与 v1 相同)
 	logger.Debug("Cancelling client context", "client_id", c.getClientID())
 	c.cancel()
 
 	// Step 2: 获取连接数量 (与 v1 相同)
-	c.connsMu.RLock()
-	connectionCount := len(c.conns)
-	c.connsMu.RUnlock()
+	connectionCount := c.connMgr.GetConnectionCount()
 
 	if connectionCount > 0 {
 		logger.Info("Waiting for active connections to finish", "client_id", c.getClientID(), "connection_count", connectionCount)
@@ -149,7 +153,8 @@ func (c *Client) Stop() error {
 
 	// Step 4: 关闭所有连接 (与 v1 相同)
 	logger.Debug("Closing all connections", "client_id", c.getClientID(), "connection_count", connectionCount)
-	c.closeAllConnections()
+	c.connMgr.CloseAllConnections()
+	c.connMgr.CloseAllMessageChannels()
 	if connectionCount > 0 {
 		logger.Debug("All connections closed", "client_id", c.getClientID())
 	}
@@ -165,12 +170,12 @@ func (c *Client) Stop() error {
 	select {
 	case <-done:
 		logger.Debug("All client goroutines finished gracefully", "client_id", c.getClientID())
-	case <-time.After(common.DefaultShutdownTimeout):
+	case <-time.After(protocol.DefaultShutdownTimeout):
 		logger.Warn("Timeout waiting for client goroutines to finish", "client_id", c.getClientID())
 	}
 
 	// 停止指标报告器
-	common.StopMetricsReporter()
+	monitoring.StopMetricsReporter()
 
 	logger.Info("Client shutdown completed", "client_id", c.getClientID(), "connections_closed", connectionCount)
 

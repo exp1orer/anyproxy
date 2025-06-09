@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/buhuipao/anyproxy/pkg/config"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/utils"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
@@ -546,7 +546,7 @@ func TestGateway_StartStop(t *testing.T) {
 
 		// Replace proxies with mocks
 		mockProxy := &mockProxy{}
-		gw.proxies = []common.GatewayProxy{mockProxy}
+		gw.proxies = []utils.GatewayProxy{mockProxy}
 
 		// Start gateway
 		err = gw.Start()
@@ -589,7 +589,7 @@ func TestGateway_StartStop(t *testing.T) {
 		// Replace proxies with failing mocks
 		mockProxy1 := &mockProxy{}
 		mockProxy2 := &mockProxy{startErr: errors.New("start failed")}
-		gw.proxies = []common.GatewayProxy{mockProxy1, mockProxy2}
+		gw.proxies = []utils.GatewayProxy{mockProxy1, mockProxy2}
 
 		// Start gateway - should fail
 		err = gw.Start()

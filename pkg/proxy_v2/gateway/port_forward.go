@@ -11,7 +11,9 @@ import (
 
 	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/buhuipao/anyproxy/pkg/logger"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	commonctx "github.com/buhuipao/anyproxy/pkg/proxy_v2/common/context"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/utils"
 )
 
 // PortForwardManager 端口转发管理器 (从 v1 完整迁移)
@@ -155,8 +157,8 @@ func (pm *PortForwardManager) createPortListener(client *ClientConn, openPort co
 	logger.Debug("Creating port listener", "client_id", client.ID, "port", openPort.RemotePort, "protocol", openPort.Protocol, "local_target", fmt.Sprintf("%s:%d", openPort.LocalHost, openPort.LocalPort))
 
 	// Support both TCP and UDP
-	if openPort.Protocol != common.ProtocolTCP && openPort.Protocol != common.ProtocolUDP {
-		logger.Error("Unsupported protocol for port forwarding", "client_id", client.ID, "port", openPort.RemotePort, "protocol", openPort.Protocol, "supported_protocols", []string{common.ProtocolTCP, common.ProtocolUDP})
+	if openPort.Protocol != protocol.ProtocolTCP && openPort.Protocol != protocol.ProtocolUDP {
+		logger.Error("Unsupported protocol for port forwarding", "client_id", client.ID, "port", openPort.RemotePort, "protocol", openPort.Protocol, "supported_protocols", []string{protocol.ProtocolTCP, protocol.ProtocolUDP})
 		return nil, fmt.Errorf("protocol %s not supported, only TCP and UDP are supported", openPort.Protocol)
 	}
 
@@ -175,11 +177,11 @@ func (pm *PortForwardManager) createPortListener(client *ClientConn, openPort co
 
 	logger.Debug("Port listener structure created", "client_id", client.ID, "port", openPort.RemotePort, "bind_addr", addr)
 
-	if openPort.Protocol == common.ProtocolTCP {
+	if openPort.Protocol == protocol.ProtocolTCP {
 		// Create TCP listener
 		logger.Debug("Creating TCP listener", "client_id", client.ID, "port", openPort.RemotePort, "bind_addr", addr)
 
-		listener, err := net.Listen(common.ProtocolTCP, addr)
+		listener, err := net.Listen(protocol.ProtocolTCP, addr)
 		if err != nil {
 			logger.Error("Failed to create TCP listener", "client_id", client.ID, "port", openPort.RemotePort, "bind_addr", addr, "err", err)
 			cancel()
@@ -215,7 +217,7 @@ func (pm *PortForwardManager) handlePortListener(portListener *PortListener) {
 		portListener.cancel()
 
 		// Close the appropriate connection based on protocol
-		if portListener.Protocol == common.ProtocolTCP && portListener.Listener != nil {
+		if portListener.Protocol == protocol.ProtocolTCP && portListener.Listener != nil {
 			if err := portListener.Listener.Close(); err != nil {
 				logger.Debug("Error closing TCP listener", "port", portListener.Port, "err", err)
 			}
@@ -230,7 +232,7 @@ func (pm *PortForwardManager) handlePortListener(portListener *PortListener) {
 
 	logger.Info("Started listening for port forwarding", "port", portListener.Port, "protocol", portListener.Protocol, "client_id", portListener.ClientID, "local_target", net.JoinHostPort(portListener.LocalHost, strconv.Itoa(portListener.LocalPort)))
 
-	if portListener.Protocol == common.ProtocolTCP {
+	if portListener.Protocol == protocol.ProtocolTCP {
 		pm.handleTCPPortListener(portListener)
 	} else {
 		pm.handleUDPPortListener(portListener)
@@ -369,16 +371,16 @@ func (pm *PortForwardManager) handleUDPPortListener(portListener *PortListener) 
 // handleUDPPacket 处理单个 UDP 数据包 (从 v1 完整迁移)
 func (pm *PortForwardManager) handleUDPPacket(portListener *PortListener, data []byte, clientAddr net.Addr) {
 	// 生成连接 ID
-	connID := common.GenerateConnID()
-	ctx := common.WithConnID(context.Background(), connID)
+	connID := utils.GenerateConnID()
+	ctx := commonctx.WithConnID(context.Background(), connID)
 
 	// Create target address
 	targetAddr := net.JoinHostPort(portListener.LocalHost, strconv.Itoa(portListener.LocalPort))
 
 	logger.Debug("New UDP packet to forwarded port", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "client_addr", clientAddr, "data_size", len(data))
 
-	// 修复：使用客户端的 dialNetwork 方法通过代理隧道连接，而不是直接从 Gateway 连接
-	targetConn, err := portListener.Client.dialNetwork(ctx, common.ProtocolUDP, targetAddr)
+	// 连接到目标（使用客户端的拨号功能）
+	targetConn, err := portListener.Client.dialNetwork(ctx, protocol.ProtocolUDP, targetAddr)
 	if err != nil {
 		logger.Error("Failed to create UDP connection to target through client tunnel", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "err", err)
 		return
@@ -438,16 +440,16 @@ func (pm *PortForwardManager) handleForwardedConnection(portListener *PortListen
 	}()
 
 	// 生成连接 ID
-	connID := common.GenerateConnID()
-	ctx := common.WithConnID(context.Background(), connID)
+	connID := utils.GenerateConnID()
+	ctx := commonctx.WithConnID(context.Background(), connID)
 
 	// Create target address
 	targetAddr := net.JoinHostPort(portListener.LocalHost, strconv.Itoa(portListener.LocalPort))
 
 	logger.Info("New port forwarding connection", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr())
 
-	// Use the client's dialNetwork method to create connection - this reuses existing logic
-	clientConn, err := portListener.Client.dialNetwork(ctx, common.ProtocolTCP, targetAddr)
+	// 连接到目标（使用客户端的拨号功能）
+	clientConn, err := portListener.Client.dialNetwork(ctx, protocol.ProtocolTCP, targetAddr)
 	if err != nil {
 		logger.Error("Port forwarding connection failed", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr(), "err", err)
 		return

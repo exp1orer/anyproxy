@@ -1,8 +1,10 @@
-package common
+package context
 
 import (
 	"context"
 	"testing"
+
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/utils"
 )
 
 func TestWithConnID(t *testing.T) {
@@ -132,18 +134,18 @@ func TestGetConnID(t *testing.T) {
 func TestWithUserContext(t *testing.T) {
 	tests := []struct {
 		name    string
-		userCtx *UserContext
+		userCtx *utils.UserContext
 	}{
 		{
 			name: "basic user context",
-			userCtx: &UserContext{
+			userCtx: &utils.UserContext{
 				Username: "testuser",
 				GroupID:  "group1",
 			},
 		},
 		{
 			name: "user context with empty fields",
-			userCtx: &UserContext{
+			userCtx: &utils.UserContext{
 				Username: "",
 				GroupID:  "",
 			},
@@ -154,7 +156,7 @@ func TestWithUserContext(t *testing.T) {
 		},
 		{
 			name: "user context with special characters",
-			userCtx: &UserContext{
+			userCtx: &utils.UserContext{
 				Username: "user@example.com",
 				GroupID:  "group-123-abc",
 			},
@@ -199,16 +201,16 @@ func TestGetUserContext(t *testing.T) {
 	tests := []struct {
 		name     string
 		setupCtx func() context.Context
-		wantUser *UserContext
+		wantUser *utils.UserContext
 		wantOK   bool
 	}{
 		{
 			name: "context with user context",
 			setupCtx: func() context.Context {
-				userCtx := &UserContext{Username: "alice", GroupID: "admin"}
+				userCtx := &utils.UserContext{Username: "alice", GroupID: "admin"}
 				return WithUserContext(context.Background(), userCtx)
 			},
-			wantUser: &UserContext{Username: "alice", GroupID: "admin"},
+			wantUser: &utils.UserContext{Username: "alice", GroupID: "admin"},
 			wantOK:   true,
 		},
 		{
@@ -230,13 +232,13 @@ func TestGetUserContext(t *testing.T) {
 		{
 			name: "overwritten user context",
 			setupCtx: func() context.Context {
-				oldUser := &UserContext{Username: "old", GroupID: "old-group"}
-				newUser := &UserContext{Username: "new", GroupID: "new-group"}
+				oldUser := &utils.UserContext{Username: "old", GroupID: "old-group"}
+				newUser := &utils.UserContext{Username: "new", GroupID: "new-group"}
 				ctx := WithUserContext(context.Background(), oldUser)
 				ctx = WithUserContext(ctx, newUser)
 				return ctx
 			},
-			wantUser: &UserContext{Username: "new", GroupID: "new-group"},
+			wantUser: &utils.UserContext{Username: "new", GroupID: "new-group"},
 			wantOK:   true,
 		},
 	}
@@ -278,7 +280,7 @@ func TestContextCombination(t *testing.T) {
 	ctx = WithConnID(ctx, connID)
 
 	// Add user context
-	userCtx := &UserContext{
+	userCtx := &utils.UserContext{
 		Username: "testuser",
 		GroupID:  "testgroup",
 	}
@@ -311,7 +313,7 @@ func TestContextPropagation(t *testing.T) {
 
 	// Add values to base context
 	ctx := WithConnID(baseCtx, "conn-prop-123")
-	ctx = WithUserContext(ctx, &UserContext{Username: "propuser", GroupID: "propgroup"})
+	ctx = WithUserContext(ctx, &utils.UserContext{Username: "propuser", GroupID: "propgroup"})
 
 	// Create a derived context with cancel
 	derivedCtx, cancel := context.WithCancel(ctx)

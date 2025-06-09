@@ -20,12 +20,3 @@ func (c *Client) generateClientID() string {
 	generatedID := fmt.Sprintf("%s-r%d-%s", c.config.ClientID, c.replicaIdx, xid.New().String())
 	return generatedID
 }
-
-// getMessageFields 获取消息的所有字段名（用于调试）(与 v1 相同)
-func getMessageFields(msg map[string]interface{}) []string {
-	fields := make([]string, 0, len(msg))
-	for key := range msg {
-		fields = append(fields, key)
-	}
-	return fields
-}

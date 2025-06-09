@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/buhuipao/anyproxy/pkg/logger"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/message"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/monitoring"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
@@ -121,6 +123,9 @@ func (c *Client) connect() error {
 	c.conn = conn
 	logger.Info("Transport connection established successfully", "client_id", c.actualID, "group_id", c.config.GroupID, "remote_addr", conn.RemoteAddr())
 
+	// 🆕 初始化消息处理器
+	c.msgHandler = message.NewClientExtendedMessageHandler(conn)
+
 	// 发送端口转发请求 (与 v1 相同)
 	if len(c.config.OpenPorts) > 0 {
 		logger.Debug("Sending port forwarding request", "client_id", c.actualID, "port_count", len(c.config.OpenPorts))
@@ -148,15 +153,14 @@ func (c *Client) cleanup() {
 		logger.Debug("Transport connection stopped", "client_id", c.getClientID())
 	}
 
-	// 获取连接数量 (与 v1 相同)
-	c.connsMu.RLock()
-	connectionCount := len(c.conns)
-	c.connsMu.RUnlock()
+	// 获取连接数量 (使用 ConnectionManager)
+	connectionCount := c.connMgr.GetConnectionCount()
 
-	// 关闭所有连接 (与 v1 相同)
+	// 关闭所有连接 (使用 ConnectionManager)
 	if connectionCount > 0 {
 		logger.Debug("Closing connections during cleanup", "client_id", c.getClientID(), "connection_count", connectionCount)
-		c.closeAllConnections()
+		c.connMgr.CloseAllConnections()
+		c.connMgr.CloseAllMessageChannels()
 	}
 
 	logger.Debug("Cleanup completed", "client_id", c.getClientID(), "connections_closed", connectionCount)
@@ -164,55 +168,23 @@ func (c *Client) cleanup() {
 
 // closeAllConnections closes all active connections (与 v1 相同)
 func (c *Client) closeAllConnections() {
-	c.connsMu.Lock()
-	defer c.connsMu.Unlock()
-
-	connectionCount := len(c.conns)
-	if connectionCount == 0 {
-		logger.Debug("No connections to close", "client_id", c.getClientID())
-		return
-	}
-
-	logger.Debug("Closing all active connections", "client_id", c.getClientID(), "connection_count", connectionCount)
-
-	closedCount := 0
-	for connID, conn := range c.conns {
-		if err := conn.Close(); err != nil {
-			logger.Debug("Error closing connection (expected during shutdown)", "client_id", c.getClientID(), "conn_id", connID, "err", err)
-		} else {
-			closedCount++
-		}
-	}
-	c.conns = make(map[string]net.Conn)
-
-	// 关闭所有消息通道 (与 v1 相同)
-	c.msgChansMu.Lock()
-	channelCount := len(c.msgChans)
-	for connID, msgChan := range c.msgChans {
-		close(msgChan)
-		delete(c.msgChans, connID)
-	}
-	c.msgChansMu.Unlock()
-
-	logger.Debug("All connections and channels closed", "client_id", c.getClientID(), "connections_closed", closedCount, "channels_closed", channelCount)
+	c.connMgr.CloseAllConnections()
+	c.connMgr.CloseAllMessageChannels()
 }
 
 // handleConnection 处理单个客户端连接的数据传输 (与 v1 相同)
 func (c *Client) handleConnection(connID string) {
 	logger.Debug("Starting connection handler", "client_id", c.getClientID(), "conn_id", connID)
 
-	// 获取连接 (与 v1 相同)
-	c.connsMu.RLock()
-	conn, exists := c.conns[connID]
-	c.connsMu.RUnlock()
-
+	// 获取连接 (使用 ConnectionManager)
+	conn, exists := c.connMgr.GetConnection(connID)
 	if !exists {
 		logger.Error("Connection not found in connection handler", "client_id", c.getClientID(), "conn_id", connID)
 		return
 	}
 
-	// 增加缓冲区大小以获得更好的性能 (与 v1 相同)
-	buffer := make([]byte, common.DefaultBufferSize)
+	// 使用缓冲区读取数据，提高性能 (与 v1 相同)
+	buffer := make([]byte, protocol.DefaultBufferSize)
 	totalBytes := 0
 	readCount := 0
 
@@ -224,8 +196,8 @@ func (c *Client) handleConnection(connID string) {
 		default:
 		}
 
-		// 设置读取超时以防止永久阻塞 (与 v1 相同)
-		deadline := time.Now().Add(common.DefaultReadTimeout)
+		// 设置读取超时，带上下文感知 (与 v1 相同)
+		deadline := time.Now().Add(protocol.DefaultReadTimeout)
 		if ctxDeadline, ok := c.ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
 			deadline = ctxDeadline
 		}
@@ -255,7 +227,7 @@ func (c *Client) handleConnection(connID string) {
 			// 发送关闭消息到网关 (与 v1 相同)
 			c.writeCloseMessage(connID)
 
-			// 清理连接 (与 v1 相同)
+			// 清理连接 (使用 ConnectionManager)
 			c.cleanupConnection(connID)
 			return
 		}
@@ -263,8 +235,8 @@ func (c *Client) handleConnection(connID string) {
 		if n > 0 {
 			totalBytes += n
 
-			// 使用日志采样器减少噪音
-			if common.ShouldLogData() && n > 1000 {
+			// 采样日志，减少日志量
+			if monitoring.ShouldLogData() && n > 1000 {
 				logger.Debug("Read data from local connection", "client_id", c.getClientID(), "conn_id", connID, "bytes", n, "total_bytes", totalBytes)
 			}
 
@@ -278,33 +250,12 @@ func (c *Client) handleConnection(connID string) {
 	}
 }
 
-// cleanupConnection 清理连接并发送关闭消息 (与 v1 相同)
+// cleanupConnection 清理连接并发送关闭消息 (使用 ConnectionManager)
 func (c *Client) cleanupConnection(connID string) {
 	logger.Debug("Cleaning up connection", "client_id", c.getClientID(), "conn_id", connID)
 
-	// 移除连接 (与 v1 相同)
-	c.connsMu.Lock()
-	conn, exists := c.conns[connID]
-	if exists {
-		delete(c.conns, connID)
-	}
-	c.connsMu.Unlock()
-
-	// 如果连接存在，关闭它 (与 v1 相同)
-	if exists && conn != nil {
-		if err := conn.Close(); err != nil {
-			logger.Debug("Error closing connection (expected during cleanup)", "client_id", c.getClientID(), "conn_id", connID, "err", err)
-		}
-	}
-
-	// 移除消息通道 (与 v1 相同)
-	c.msgChansMu.Lock()
-	msgChan, exists := c.msgChans[connID]
-	if exists {
-		delete(c.msgChans, connID)
-		close(msgChan)
-	}
-	c.msgChansMu.Unlock()
+	// 使用 ConnectionManager 清理连接
+	c.connMgr.CleanupConnection(connID)
 
 	logger.Debug("Connection cleaned up", "client_id", c.getClientID(), "conn_id", connID)
 }

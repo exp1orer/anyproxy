@@ -7,7 +7,8 @@ import (
 	"time"
 
 	"github.com/buhuipao/anyproxy/pkg/config"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	commonctx "github.com/buhuipao/anyproxy/pkg/proxy_v2/common/context"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/utils"
 )
 
 func TestNewSOCKS5ProxyWithAuth(t *testing.T) {
@@ -177,16 +178,16 @@ func TestSOCKS5Proxy_StopWithoutStart(t *testing.T) {
 func TestSOCKS5Proxy_DialFunction(t *testing.T) {
 	// Track if dial function was called
 	testDialFunc := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		// Verify context has connID
-		connID, ok := common.GetConnID(ctx)
+		// Check if connID was added to context
+		connID, ok := commonctx.GetConnID(ctx)
 		if !ok || connID == "" {
 			t.Error("Expected connID in context")
 		}
 
-		// Verify user context
+		// Check if user context was added
 		type userContextKey string
 		const userKey userContextKey = "user"
-		userCtx, ok := ctx.Value(userKey).(*common.UserContext)
+		userCtx, ok := ctx.Value(userKey).(*utils.UserContext)
 		if !ok || userCtx == nil {
 			t.Error("Expected user context in dial function")
 		}

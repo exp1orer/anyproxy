@@ -13,7 +13,12 @@ import (
 
 	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/buhuipao/anyproxy/pkg/logger"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/connection"
+	commonctx "github.com/buhuipao/anyproxy/pkg/proxy_v2/common/context"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/message"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/monitoring"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/utils"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
@@ -30,6 +35,9 @@ type ClientConn struct {
 	stopOnce       sync.Once
 	wg             sync.WaitGroup
 	portForwardMgr *PortForwardManager
+
+	// 🆕 公共消息处理器
+	msgHandler message.ExtendedMessageHandler
 }
 
 // Conn 连接结构 (与 v1 相同)
@@ -123,12 +131,12 @@ func (c *ClientConn) Stop() {
 
 func (c *ClientConn) dialNetwork(ctx context.Context, network, addr string) (net.Conn, error) {
 	// 优先使用 context 中的 connID，如果没有则生成新的
-	connID, ok := common.GetConnID(ctx)
+	connID, ok := commonctx.GetConnID(ctx)
 	if !ok {
-		connID = common.GenerateConnID()
+		connID = utils.GenerateConnID()
 		logger.Debug("Generated new connection ID", "client_id", c.ID, "conn_id", connID)
 		// 将 connID 添加到 context 中，供后续组件使用
-		ctx = common.WithConnID(ctx, connID) //nolint:staticcheck // ctx will be used in future versions
+		ctx = commonctx.WithConnID(ctx, connID) //nolint:staticcheck // ctx will be used in future versions
 	}
 
 	logger.Debug("Creating new network connection", "client_id", c.ID, "conn_id", connID, "network", network, "address", addr)
@@ -170,7 +178,7 @@ func (c *ClientConn) dialNetwork(ctx context.Context, network, addr string) (net
 	}()
 
 	// 🚨 修复：返回包装后的连接，与 v1 保持一致 (重要的地址信息包装)
-	connWrapper := common.NewConnWrapper(pipe1, network, addr)
+	connWrapper := connection.NewConnWrapper(pipe1, network, addr)
 	connWrapper.SetConnID(connID)
 	return connWrapper, nil
 }
@@ -200,20 +208,20 @@ func (c *ClientConn) handleMessage() {
 		// 处理消息类型 (与 v1 相同)
 		msgType, ok := msg["type"].(string)
 		if !ok {
-			logger.Error("Invalid message format from client - missing or invalid type field", "client_id", c.ID, "message_count", messageCount, "message_fields", gatewayGetMessageFields(msg))
+			logger.Error("Invalid message format from client - missing or invalid type field", "client_id", c.ID, "message_count", messageCount, "message_fields", utils.GetMessageFields(msg))
 			continue
 		}
 
 		// 记录消息处理（但不记录高频数据消息）(与 v1 相同)
-		if msgType != common.MsgTypeData {
+		if msgType != protocol.MsgTypeData {
 			logger.Debug("Processing message", "client_id", c.ID, "message_type", msgType, "message_count", messageCount)
 		}
 
 		switch msgType {
-		case common.MsgTypeConnectResponse, common.MsgTypeData, common.MsgTypeClose:
+		case protocol.MsgTypeConnectResponse, protocol.MsgTypeData, protocol.MsgTypeClose:
 			// 将所有消息路由到每个连接的通道 (与 v1 相同)
 			c.routeMessage(msg)
-		case common.MsgTypePortForwardReq:
+		case protocol.MsgTypePortForwardReq:
 			// 直接处理端口转发请求 (与 v1 相同)
 			logger.Info("Received port forwarding request", "client_id", c.ID)
 			c.handlePortForwardRequest(msg)
@@ -229,7 +237,7 @@ func (c *ClientConn) handleMessage() {
 func (c *ClientConn) routeMessage(msg map[string]interface{}) {
 	connID, ok := msg["id"].(string)
 	if !ok {
-		logger.Error("Invalid connection ID in message - missing or wrong type", "client_id", c.ID, "message_fields", gatewayGetMessageFields(msg))
+		logger.Error("Invalid connection ID in message - missing or wrong type", "client_id", c.ID, "message_fields", utils.GetMessageFields(msg))
 		return
 	}
 
@@ -255,7 +263,7 @@ func (c *ClientConn) routeMessage(msg map[string]interface{}) {
 	select {
 	case msgChan <- msg:
 		// 成功路由，不记录高频数据消息 (与 v1 相同)
-		if msgType != common.MsgTypeData {
+		if msgType != protocol.MsgTypeData {
 			logger.Debug("Message routed successfully", "client_id", c.ID, "conn_id", connID, "message_type", msgType)
 		}
 	case <-c.ctx.Done():
@@ -280,7 +288,7 @@ func (c *ClientConn) createMessageChannel(connID string) {
 		return
 	}
 
-	msgChan := make(chan map[string]interface{}, common.DefaultMessageChannelSize)
+	msgChan := make(chan map[string]interface{}, protocol.DefaultMessageChannelSize)
 	c.msgChans[connID] = msgChan
 
 	// 为此连接启动消息处理器 (与 v1 相同)
@@ -304,11 +312,11 @@ func (c *ClientConn) processConnectionMessages(_ string, msgChan chan map[string
 
 			msgType, _ := msg["type"].(string)
 			switch msgType {
-			case common.MsgTypeConnectResponse:
+			case protocol.MsgTypeConnectResponse:
 				c.handleConnectResponseMessage(msg)
-			case common.MsgTypeData:
+			case protocol.MsgTypeData:
 				c.handleDataMessage(msg)
-			case common.MsgTypeClose:
+			case protocol.MsgTypeClose:
 				c.handleCloseMessage(msg)
 				return // 连接关闭，停止处理
 			}
@@ -321,7 +329,7 @@ func (c *ClientConn) handleDataMessage(msg map[string]interface{}) {
 	// 提取连接ID和数据 (与 v1 相同)
 	connID, ok := msg["id"].(string)
 	if !ok {
-		logger.Error("Invalid connection ID in data message", "client_id", c.ID, "message_fields", gatewayGetMessageFields(msg))
+		logger.Error("Invalid connection ID in data message", "client_id", c.ID, "message_fields", utils.GetMessageFields(msg))
 		return
 	}
 
@@ -344,7 +352,7 @@ func (c *ClientConn) handleDataMessage(msg map[string]interface{}) {
 	}
 
 	// 使用日志采样器减少噪音
-	if common.ShouldLogData() && len(data) > 1000 {
+	if monitoring.ShouldLogData() && len(data) > 1000 {
 		logger.Debug("Gateway received data chunk", "client_id", c.ID, "conn_id", connID, "bytes", len(data))
 	}
 
@@ -358,7 +366,7 @@ func (c *ClientConn) handleDataMessage(msg map[string]interface{}) {
 	}
 
 	// 将数据写入本地连接，带上下文感知 (与 v1 相同)
-	deadline := time.Now().Add(common.DefaultWriteTimeout)
+	deadline := time.Now().Add(protocol.DefaultWriteTimeout)
 	if ctxDeadline, ok := c.ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
 		deadline = ctxDeadline
 	}
@@ -384,7 +392,7 @@ func (c *ClientConn) handleCloseMessage(msg map[string]interface{}) {
 	// 提取连接ID (与 v1 相同)
 	connID, ok := msg["id"].(string)
 	if !ok {
-		logger.Error("Invalid connection ID in close message", "client_id", c.ID, "message_fields", gatewayGetMessageFields(msg))
+		logger.Error("Invalid connection ID in close message", "client_id", c.ID, "message_fields", utils.GetMessageFields(msg))
 		return
 	}
 
@@ -462,13 +470,13 @@ func (c *ClientConn) closeConnectionUnsafe(connID string) {
 func (c *ClientConn) handleConnectResponseMessage(msg map[string]interface{}) {
 	connID, ok := msg["id"].(string)
 	if !ok {
-		logger.Error("Invalid connection ID in connect response", "client_id", c.ID, "message_fields", gatewayGetMessageFields(msg))
+		logger.Error("Invalid connection ID in connect response", "client_id", c.ID, "message_fields", utils.GetMessageFields(msg))
 		return
 	}
 
 	success, ok := msg["success"].(bool)
 	if !ok {
-		logger.Error("Invalid success field in connect response", "client_id", c.ID, "conn_id", connID, "message_fields", gatewayGetMessageFields(msg))
+		logger.Error("Invalid success field in connect response", "client_id", c.ID, "conn_id", connID, "message_fields", utils.GetMessageFields(msg))
 		return
 	}
 
@@ -495,7 +503,7 @@ func (c *ClientConn) handleConnection(proxyConn *Conn) {
 	logger.Debug("Starting connection handler", "client_id", c.ID, "conn_id", proxyConn.ID)
 
 	// 增加缓冲区大小以获得更好的性能 (与 v1 相同)
-	buffer := make([]byte, common.DefaultBufferSize)
+	buffer := make([]byte, protocol.DefaultBufferSize)
 	totalBytes := 0
 	readCount := 0
 	startTime := time.Now()
@@ -517,7 +525,7 @@ func (c *ClientConn) handleConnection(proxyConn *Conn) {
 		}
 
 		// 基于上下文设置读取截止时间 (与 v1 相同)
-		deadline := time.Now().Add(common.DefaultReadTimeout)
+		deadline := time.Now().Add(protocol.DefaultReadTimeout)
 		if ctxDeadline, ok := c.ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
 			deadline = ctxDeadline
 		}
@@ -686,19 +694,10 @@ func (c *ClientConn) sendPortForwardResponse(success bool, message string) {
 	}
 
 	// 创建状态列表（简化版本，只包含成功状态）
-	var statuses []common.PortForwardStatus
+	var statuses []protocol.PortForwardStatus
 
-	binaryMsg := common.PackPortForwardResponseMessage(success, errorMsg, statuses)
+	binaryMsg := protocol.PackPortForwardResponseMessage(success, errorMsg, statuses)
 	if err := c.Conn.WriteMessage(binaryMsg); err != nil {
 		logger.Error("Failed to send port forward response", "client_id", c.ID, "err", err)
 	}
-}
-
-// gatewayGetMessageFields 获取安全的消息字段名称用于日志记录 (与 v1 相同)
-func gatewayGetMessageFields(msg map[string]interface{}) []string {
-	fields := make([]string, 0, len(msg))
-	for key := range msg {
-		fields = append(fields, key)
-	}
-	return fields
 }

@@ -1,4 +1,4 @@
-package proxy_protocols // nolint:revive // Package name intentionally uses underscore to avoid conflict with main proxy package
+package proxy_protocols
 
 import (
 	"context"
@@ -6,11 +6,12 @@ import (
 	"log"
 	"net"
 
-	"github.com/things-go/go-socks5"
-
 	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/buhuipao/anyproxy/pkg/logger"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/connection"
+	commonctx "github.com/buhuipao/anyproxy/pkg/proxy_v2/common/context"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/utils"
+	"github.com/things-go/go-socks5"
 )
 
 // SOCKS5Proxy SOCKS5代理实现 (基于 v1 设计)
@@ -23,11 +24,11 @@ type SOCKS5Proxy struct {
 }
 
 // NewSOCKS5ProxyWithAuth creates a new SOCKS5 proxy with authentication (与 v1 相同)
-func NewSOCKS5ProxyWithAuth(config *config.SOCKS5Config, dialFn func(context.Context, string, string) (net.Conn, error), groupExtractor func(string) string) (common.GatewayProxy, error) {
-	logger.Info("Creating SOCKS5 proxy", "listen_addr", config.ListenAddr, "auth_enabled", config.AuthUsername != "")
+func NewSOCKS5ProxyWithAuth(cfg *config.SOCKS5Config, dialFn func(context.Context, string, string) (net.Conn, error), groupExtractor func(string) string) (utils.GatewayProxy, error) {
+	logger.Info("Creating SOCKS5 proxy", "listen_addr", cfg.ListenAddr, "auth_enabled", cfg.AuthUsername != "")
 
 	proxy := &SOCKS5Proxy{
-		config:         config,
+		config:         cfg,
 		dialFunc:       dialFn,
 		groupExtractor: groupExtractor,
 	}
@@ -35,26 +36,26 @@ func NewSOCKS5ProxyWithAuth(config *config.SOCKS5Config, dialFn func(context.Con
 	// 配置认证方法 (与 v1 相同)
 	socks5Auths := []socks5.Authenticator{}
 
-	if config.AuthUsername != "" && config.AuthPassword != "" {
-		logger.Debug("Configuring SOCKS5 authentication", "auth_username", config.AuthUsername)
+	if cfg.AuthUsername != "" && cfg.AuthPassword != "" {
+		logger.Debug("Configuring SOCKS5 authentication", "auth_username", cfg.AuthUsername)
 
 		// 使用内置的 UserPassAuthenticator 和自定义凭证存储 (与 v1 相同)
 		credStore := &GroupBasedCredentialStore{
-			ConfigUsername: config.AuthUsername,
-			ConfigPassword: config.AuthPassword,
+			ConfigUsername: cfg.AuthUsername,
+			ConfigPassword: cfg.AuthPassword,
 		}
 		socks5Auths = append(socks5Auths, socks5.UserPassAuthenticator{
 			Credentials: credStore,
 		})
-		logger.Debug("SOCKS5 user/password authentication configured", "auth_username", config.AuthUsername)
+		logger.Debug("SOCKS5 user/password authentication configured", "auth_username", cfg.AuthUsername)
 	} else {
 		logger.Debug("No authentication configured for SOCKS5 proxy")
 	}
 
 	// 创建包装的拨号函数，支持组信息提取 (与 v1 相同)
 	wrappedDialFunc := func(ctx context.Context, network, addr string, request *socks5.Request) (net.Conn, error) {
-		// 在请求开始时就生成 connID，贯穿整个请求生命周期
-		connID := common.GenerateConnID()
+		// 生成新的连接ID
+		connID := utils.GenerateConnID()
 
 		clientAddr := "unknown"
 		if request != nil {
@@ -62,10 +63,10 @@ func NewSOCKS5ProxyWithAuth(config *config.SOCKS5Config, dialFn func(context.Con
 		}
 		logger.Info("SOCKS5 dial request received", "conn_id", connID, "network", network, "address", addr, "client", clientAddr)
 
-		// 将 connID 添加到 context 中
-		ctx = common.WithConnID(ctx, connID)
+		// 将连接ID添加到上下文
+		ctx = commonctx.WithConnID(ctx, connID)
 
-		var userCtx *common.UserContext
+		var userCtx *utils.UserContext
 
 		// 从请求的 AuthContext 中提取用户信息 (与 v1 相同)
 		if request.AuthContext != nil && request.AuthContext.Payload != nil {
@@ -75,7 +76,7 @@ func NewSOCKS5ProxyWithAuth(config *config.SOCKS5Config, dialFn func(context.Con
 					groupID = groupExtractor(username)
 					logger.Debug("Extracted group ID from SOCKS5 username", "conn_id", connID, "username", username, "group_id", groupID)
 				}
-				userCtx = &common.UserContext{
+				userCtx = &utils.UserContext{
 					Username: username,
 					GroupID:  groupID,
 				}
@@ -87,7 +88,7 @@ func NewSOCKS5ProxyWithAuth(config *config.SOCKS5Config, dialFn func(context.Con
 
 		// 如果没有提取到用户上下文，创建默认的 (与 v1 相同)
 		if userCtx == nil {
-			userCtx = &common.UserContext{
+			userCtx = &utils.UserContext{
 				Username: "socks5-user", // SOCKS5 的默认用户名
 				GroupID:  "",            // 默认组
 			}
@@ -112,12 +113,12 @@ func NewSOCKS5ProxyWithAuth(config *config.SOCKS5Config, dialFn func(context.Con
 
 		logger.Info("SOCKS5 dial successful", "conn_id", connID, "network", network, "address", addr, "username", userCtx.Username, "group_id", userCtx.GroupID)
 
-		// 🆕 使用 ConnWrapper 包装连接以提供正确的地址信息
-		wrappedConn := common.NewConnWrapper(conn, network, addr)
+		// 🚨 Fix: Wrap the connection to include the remote address information
+		wrappedConn := connection.NewConnWrapper(conn, network, addr)
 		return wrappedConn, nil
 	}
 
-	logger.Debug("Configuring SOCKS5 server", "listen_addr", config.ListenAddr, "auth_methods_count", len(socks5Auths))
+	logger.Debug("Configuring SOCKS5 server", "listen_addr", cfg.ListenAddr, "auth_methods_count", len(socks5Auths))
 
 	// 创建 SOCKS5 服务器 (与 v1 相同)
 	server := socks5.NewServer(
@@ -127,7 +128,7 @@ func NewSOCKS5ProxyWithAuth(config *config.SOCKS5Config, dialFn func(context.Con
 	)
 
 	proxy.server = server
-	logger.Info("SOCKS5 proxy created successfully", "listen_addr", config.ListenAddr)
+	logger.Info("SOCKS5 proxy created successfully", "listen_addr", cfg.ListenAddr)
 	return proxy, nil
 }
 

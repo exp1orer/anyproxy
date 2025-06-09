@@ -13,7 +13,7 @@ import (
 	"google.golang.org/grpc/metadata"
 
 	"github.com/buhuipao/anyproxy/pkg/logger"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
@@ -258,5 +258,5 @@ func getMetadataValue(md metadata.MD, key string) string {
 // Register the transport creator
 func init() {
 	// 修复：使用明确的常量，避免空字符串注册
-	transport.RegisterTransportCreator(common.TransportTypeGRPC, NewGRPCTransportWithAuth)
+	transport.RegisterTransportCreator(protocol.TransportTypeGRPC, NewGRPCTransportWithAuth)
 }

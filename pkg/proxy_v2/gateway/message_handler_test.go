@@ -7,7 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/message"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
 )
 
 // Mock transport connection for message handler tests
@@ -98,8 +99,8 @@ func TestReadNextMessage(t *testing.T) {
 				if err != nil {
 					t.Errorf("unexpected error: %v", err)
 				}
-				if msg["type"] != common.MsgTypeData {
-					t.Errorf("expected type '%s', got %v", common.MsgTypeData, msg["type"])
+				if msg["type"] != protocol.MsgTypeData {
+					t.Errorf("expected type '%s', got %v", protocol.MsgTypeData, msg["type"])
 				}
 				if msg["id"] != "conn1" {
 					t.Errorf("expected id 'conn1', got %v", msg["id"])
@@ -131,6 +132,8 @@ func TestReadNextMessage(t *testing.T) {
 				readErr:  tt.readErr,
 			}
 			client.Conn = mockConn
+			// Initialize msgHandler
+			client.msgHandler = message.NewGatewayExtendedMessageHandler(mockConn)
 
 			msg, err := client.readNextMessage()
 			if (err != nil) != tt.wantErr {
@@ -161,8 +164,8 @@ func TestParseBinaryMessage(t *testing.T) {
 			msgData: createBinaryDataMessage("conn1", []byte("test data")),
 			wantErr: false,
 			checkResult: func(msg map[string]interface{}, err error) {
-				if msg["type"] != common.MsgTypeData {
-					t.Errorf("expected type '%s', got %v", common.MsgTypeData, msg["type"])
+				if msg["type"] != protocol.MsgTypeData {
+					t.Errorf("expected type '%s', got %v", protocol.MsgTypeData, msg["type"])
 				}
 				if msg["id"] != "conn1" {
 					t.Errorf("expected id 'conn1', got %v", msg["id"])
@@ -174,8 +177,8 @@ func TestParseBinaryMessage(t *testing.T) {
 			msgData: createBinaryConnectResponseMessage("conn1", true, ""),
 			wantErr: false,
 			checkResult: func(msg map[string]interface{}, err error) {
-				if msg["type"] != common.MsgTypeConnectResponse {
-					t.Errorf("expected type '%s', got %v", common.MsgTypeConnectResponse, msg["type"])
+				if msg["type"] != protocol.MsgTypeConnectResponse {
+					t.Errorf("expected type '%s', got %v", protocol.MsgTypeConnectResponse, msg["type"])
 				}
 				if msg["success"] != true {
 					t.Error("expected success true")
@@ -187,8 +190,8 @@ func TestParseBinaryMessage(t *testing.T) {
 			msgData: createBinaryCloseMessage("conn1"),
 			wantErr: false,
 			checkResult: func(msg map[string]interface{}, err error) {
-				if msg["type"] != common.MsgTypeClose {
-					t.Errorf("expected type '%s', got %v", common.MsgTypeClose, msg["type"])
+				if msg["type"] != protocol.MsgTypeClose {
+					t.Errorf("expected type '%s', got %v", protocol.MsgTypeClose, msg["type"])
 				}
 				if msg["id"] != "conn1" {
 					t.Errorf("expected id 'conn1', got %v", msg["id"])
@@ -204,6 +207,11 @@ func TestParseBinaryMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			mockConn := &mockTransportConn{}
+			client.Conn = mockConn
+			// Initialize msgHandler
+			client.msgHandler = message.NewGatewayExtendedMessageHandler(mockConn)
+
 			msg, err := client.parseBinaryMessage(tt.msgData)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parseBinaryMessage() error = %v, wantErr %v", err, tt.wantErr)
@@ -225,6 +233,8 @@ func TestWriteMessages(t *testing.T) {
 	t.Run("writeDataMessage", func(t *testing.T) {
 		mockConn := &mockTransportConn{}
 		client.Conn = mockConn
+		// Initialize msgHandler
+		client.msgHandler = message.NewGatewayExtendedMessageHandler(mockConn)
 
 		err := client.writeDataMessage("conn1", []byte("test data"))
 		if err != nil {
@@ -236,7 +246,7 @@ func TestWriteMessages(t *testing.T) {
 		}
 
 		// Verify it's a binary message
-		if !common.IsBinaryMessage(mockConn.writeData[0]) {
+		if !protocol.IsBinaryMessage(mockConn.writeData[0]) {
 			t.Error("expected binary message format")
 		}
 	})
@@ -244,6 +254,8 @@ func TestWriteMessages(t *testing.T) {
 	t.Run("writeConnectMessage", func(t *testing.T) {
 		mockConn := &mockTransportConn{}
 		client.Conn = mockConn
+		// Initialize msgHandler
+		client.msgHandler = message.NewGatewayExtendedMessageHandler(mockConn)
 
 		err := client.writeConnectMessage("conn1", "tcp", "example.com:80")
 		if err != nil {
@@ -258,6 +270,8 @@ func TestWriteMessages(t *testing.T) {
 	t.Run("writeCloseMessage", func(t *testing.T) {
 		mockConn := &mockTransportConn{}
 		client.Conn = mockConn
+		// Initialize msgHandler
+		client.msgHandler = message.NewGatewayExtendedMessageHandler(mockConn)
 
 		err := client.writeCloseMessage("conn1")
 		if err != nil {
@@ -272,13 +286,13 @@ func TestWriteMessages(t *testing.T) {
 
 // Helper functions to create binary messages
 func createBinaryDataMessage(connID string, data []byte) []byte {
-	return common.PackDataMessage(connID, data)
+	return protocol.PackDataMessage(connID, data)
 }
 
 func createBinaryConnectResponseMessage(connID string, success bool, errorMsg string) []byte {
-	return common.PackConnectResponseMessage(connID, success, errorMsg)
+	return protocol.PackConnectResponseMessage(connID, success, errorMsg)
 }
 
 func createBinaryCloseMessage(connID string) []byte {
-	return common.PackCloseMessage(connID)
+	return protocol.PackCloseMessage(connID)
 }

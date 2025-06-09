@@ -1,3 +1,4 @@
+// Package gateway provides v2 gateway implementation for AnyProxy.
 package gateway
 
 import (
@@ -11,7 +12,8 @@ import (
 
 	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/buhuipao/anyproxy/pkg/logger"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/message"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/utils"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/proxy_protocols"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 
@@ -24,8 +26,8 @@ import (
 // Gateway represents the proxy gateway server (基于 v1 设计)
 type Gateway struct {
 	config         *config.GatewayConfig
-	transport      transport.Transport   // 🆕 唯一的新增抽象
-	proxies        []common.GatewayProxy // 保持 v1 接口
+	transport      transport.Transport  // 🆕 唯一的新增抽象
+	proxies        []utils.GatewayProxy // 保持 v1 接口
 	clientsMu      sync.RWMutex
 	clients        map[string]*ClientConn
 	groups         map[string]map[string]struct{}
@@ -35,6 +37,7 @@ type Gateway struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
+	stopOnce       sync.Once
 }
 
 // NewGateway creates a new proxy gateway (与 v1 相似)
@@ -73,7 +76,7 @@ func NewGateway(cfg *config.Config, transportType string) (*Gateway, error) {
 	dialFn := func(ctx context.Context, network, addr string) (net.Conn, error) {
 		// 从上下文提取用户信息 (与 v1 相同)
 		var groupID string
-		if userCtx, ok := ctx.Value("user").(*common.UserContext); ok {
+		if userCtx, ok := ctx.Value("user").(*utils.UserContext); ok {
 			logger.Debug("Dial function received user context", "group_id", userCtx.GroupID, "network", network, "address", addr)
 			groupID = userCtx.GroupID
 		} else {
@@ -90,8 +93,8 @@ func NewGateway(cfg *config.Config, transportType string) (*Gateway, error) {
 		return client.dialNetwork(ctx, network, addr)
 	}
 
-	// 创建代理实例 (与 v1 相同的逻辑)
-	var proxies []common.GatewayProxy
+	// 初始化代理协议 (与 v1 相同)
+	var proxies []utils.GatewayProxy
 
 	// 创建 HTTP 代理 (与 v1 相同)
 	if cfg.Proxy.HTTP.ListenAddr != "" {
@@ -308,6 +311,9 @@ func (g *Gateway) handleConnection(conn transport.Connection) {
 		cancel:         cancel,
 		portForwardMgr: g.portForwardMgr,
 	}
+
+	// 🆕 初始化消息处理器
+	client.msgHandler = message.NewGatewayExtendedMessageHandler(conn)
 
 	g.addClient(client)
 

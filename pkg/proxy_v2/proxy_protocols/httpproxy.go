@@ -17,7 +17,9 @@ import (
 
 	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/buhuipao/anyproxy/pkg/logger"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	commonctx "github.com/buhuipao/anyproxy/pkg/proxy_v2/common/context"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/utils"
 )
 
 // 修复：使用缓冲区池减少内存分配
@@ -38,7 +40,7 @@ type HTTPProxy struct {
 }
 
 // NewHTTPProxyWithAuth creates a new HTTP proxy with authentication (same as v1)
-func NewHTTPProxyWithAuth(config *config.HTTPConfig, dialFn func(context.Context, string, string) (net.Conn, error), groupExtractor func(string) string) (common.GatewayProxy, error) {
+func NewHTTPProxyWithAuth(config *config.HTTPConfig, dialFn func(context.Context, string, string) (net.Conn, error), groupExtractor func(string) string) (utils.GatewayProxy, error) {
 	logger.Info("Creating HTTP proxy", "listen_addr", config.ListenAddr, "auth_enabled", config.AuthUsername != "")
 
 	proxy := &HTTPProxy{
@@ -113,7 +115,7 @@ func (p *HTTPProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	logger.Debug("HTTP request received", "method", r.Method, "url", r.URL.String(), "client", clientAddr, "user_agent", r.Header.Get("User-Agent"))
 
 	// Authentication check (🆕 Fix: Follow v1 logic completely)
-	var userCtx *common.UserContext
+	var userCtx *utils.UserContext
 	if p.config.AuthUsername != "" && p.config.AuthPassword != "" {
 		logger.Debug("Authentication required, checking credentials", "client", clientAddr)
 
@@ -133,7 +135,7 @@ func (p *HTTPProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Set user context (same as v1)
-		userCtx = &common.UserContext{
+		userCtx = &utils.UserContext{
 			Username: username,
 			GroupID:  groupID,
 		}
@@ -222,11 +224,11 @@ func (p *HTTPProxy) authenticateAndExtractUser(r *http.Request) (string, string,
 // handleConnect handles CONNECT requests for HTTPS tunneling (based on v1 logic)
 func (p *HTTPProxy) handleConnect(w http.ResponseWriter, r *http.Request, clientAddr string) {
 	// 在请求开始时就生成 connID，贯穿整个请求生命周期
-	connID := common.GenerateConnID()
+	connID := utils.GenerateConnID()
 	logger.Info("HTTP CONNECT request started", "conn_id", connID, "target_host", r.Host, "client", clientAddr)
 
 	// 将 connID 添加到 context 中
-	ctx := common.WithConnID(r.Context(), connID)
+	ctx := commonctx.WithConnID(r.Context(), connID)
 
 	// Extract target host and port (same as v1)
 	host := r.Host
@@ -307,7 +309,7 @@ func (p *HTTPProxy) handleConnect(w http.ResponseWriter, r *http.Request, client
 	logger.Info("CONNECT tunnel closed", "conn_id", connID, "target_host", host)
 }
 
-// transfer copies data between two connections (🆕 migrated from v1)
+// transfer copies data between two connections (�� migrated from v1)
 func (p *HTTPProxy) transfer(dst, src net.Conn, direction string, connID string) {
 	logger.Debug("Starting data transfer", "conn_id", connID, "direction", direction, "src_addr", src.RemoteAddr(), "dst_addr", dst.RemoteAddr())
 
@@ -362,11 +364,11 @@ func (p *HTTPProxy) transfer(dst, src net.Conn, direction string, connID string)
 // handleRequest handles normal HTTP requests (based on v1 logic)
 func (p *HTTPProxy) handleRequest(w http.ResponseWriter, r *http.Request, clientAddr string) {
 	// 在请求开始时就生成 connID，贯穿整个请求生命周期
-	connID := common.GenerateConnID()
+	connID := utils.GenerateConnID()
 	logger.Info("HTTP request started", "conn_id", connID, "method", r.Method, "url", r.URL.String(), "client", clientAddr)
 
 	// 将 connID 添加到 context 中
-	ctx := common.WithConnID(r.Context(), connID)
+	ctx := commonctx.WithConnID(r.Context(), connID)
 
 	// Parse target URL (same as v1)
 	targetURL := r.URL
@@ -374,7 +376,7 @@ func (p *HTTPProxy) handleRequest(w http.ResponseWriter, r *http.Request, client
 		// If URL is not absolute, construct it from Host header (same as v1)
 		scheme := "http"
 		if r.TLS != nil {
-			scheme = common.SchemeHTTPS
+			scheme = protocol.SchemeHTTPS
 		}
 		targetURL = &url.URL{
 			Scheme:   scheme,
@@ -390,7 +392,7 @@ func (p *HTTPProxy) handleRequest(w http.ResponseWriter, r *http.Request, client
 	// Create connection to target (same as v1)
 	host := targetURL.Host
 	if !strings.Contains(host, ":") {
-		if targetURL.Scheme == common.SchemeHTTPS {
+		if targetURL.Scheme == protocol.SchemeHTTPS {
 			host += ":443"
 		} else {
 			host += ":80"
@@ -413,7 +415,7 @@ func (p *HTTPProxy) handleRequest(w http.ResponseWriter, r *http.Request, client
 	logger.Debug("Connected to target server successfully", "conn_id", connID, "target_host", host)
 
 	// For HTTPS, wrap with TLS (same as v1)
-	if targetURL.Scheme == common.SchemeHTTPS {
+	if targetURL.Scheme == protocol.SchemeHTTPS {
 		logger.Debug("Wrapping connection with TLS", "conn_id", connID, "server_name", strings.Split(host, ":")[0])
 		tlsConn := tls.Client(targetConn, &tls.Config{
 			ServerName: strings.Split(host, ":")[0],

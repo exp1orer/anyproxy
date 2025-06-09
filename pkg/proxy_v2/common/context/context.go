@@ -1,7 +1,9 @@
-package common
+package context
 
 import (
 	"context"
+
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/utils"
 )
 
 // Context keys for request-scoped values
@@ -29,12 +31,12 @@ func GetConnID(ctx context.Context) (string, bool) {
 }
 
 // WithUserContext adds user context to context
-func WithUserContext(ctx context.Context, userCtx *UserContext) context.Context {
+func WithUserContext(ctx context.Context, userCtx *utils.UserContext) context.Context {
 	return context.WithValue(ctx, UserContextKey, userCtx)
 }
 
 // GetUserContext retrieves user context from context
-func GetUserContext(ctx context.Context) (*UserContext, bool) {
-	userCtx, ok := ctx.Value(UserContextKey).(*UserContext)
+func GetUserContext(ctx context.Context) (*utils.UserContext, bool) {
+	userCtx, ok := ctx.Value(UserContextKey).(*utils.UserContext)
 	return userCtx, ok
 }

@@ -1,10 +1,11 @@
+// Package transport defines transport layer abstractions.
 package transport
 
 import (
 	"sync"
 
 	"github.com/buhuipao/anyproxy/pkg/logger"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
 )
 
 var (
@@ -29,7 +30,7 @@ func RegisterTransportCreator(name string, transportCreator Creator) {
 func CreateTransport(name string, authConfig *AuthConfig) Transport {
 	// 修复：如果传入空字符串，使用默认传输类型
 	if name == "" {
-		name = common.TransportTypeDefault
+		name = protocol.TransportTypeDefault
 		logger.Debug("Using default transport type", "transport_type", name)
 	}
 

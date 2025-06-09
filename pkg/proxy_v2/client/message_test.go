@@ -5,11 +5,14 @@ import (
 	"encoding/base64"
 	"errors"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/buhuipao/anyproxy/pkg/config"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/connection"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/message"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
 )
 
 // mockMessageConnection implements transport.Connection for message testing
@@ -66,7 +69,7 @@ func TestRouteMessage(t *testing.T) {
 		{
 			name: "route connect message",
 			msg: map[string]interface{}{
-				"type": common.MsgTypeConnect,
+				"type": protocol.MsgTypeConnect,
 				"id":   "conn-1",
 			},
 			expectChannelCreated: true,
@@ -75,7 +78,7 @@ func TestRouteMessage(t *testing.T) {
 		{
 			name: "route data message to existing channel",
 			msg: map[string]interface{}{
-				"type": common.MsgTypeData,
+				"type": protocol.MsgTypeData,
 				"id":   "conn-1",
 				"data": []byte("test"),
 			},
@@ -87,14 +90,14 @@ func TestRouteMessage(t *testing.T) {
 		{
 			name: "route message without connection ID",
 			msg: map[string]interface{}{
-				"type": common.MsgTypeData,
+				"type": protocol.MsgTypeData,
 			},
 			expectMessageRouted: false,
 		},
 		{
 			name: "route message to non-existent connection",
 			msg: map[string]interface{}{
-				"type": common.MsgTypeData,
+				"type": protocol.MsgTypeData,
 				"id":   "unknown-conn",
 				"data": []byte("test"),
 			},
@@ -103,7 +106,7 @@ func TestRouteMessage(t *testing.T) {
 		{
 			name: "route message to full channel",
 			msg: map[string]interface{}{
-				"type": common.MsgTypeData,
+				"type": protocol.MsgTypeData,
 				"id":   "conn-1",
 				"data": []byte("test"),
 			},
@@ -121,24 +124,22 @@ func TestRouteMessage(t *testing.T) {
 				config: &config.ClientConfig{
 					ClientID: "test-client",
 				},
-				msgChans: make(map[string]chan map[string]interface{}),
-				conns:    make(map[string]net.Conn),
-				ctx:      context.Background(),
+				connMgr: connection.NewConnectionManager("test-client"),
+				ctx:     context.Background(),
 			}
 
 			// Set up existing channels
 			if tt.existingChannels != nil {
-				client.msgChansMu.Lock()
-				client.msgChans = tt.existingChannels
-				client.msgChansMu.Unlock()
+				for connID := range tt.existingChannels {
+					// Create channel through normal flow
+					client.connMgr.CreateMessageChannel(connID, protocol.DefaultMessageChannelSize)
+				}
 			}
 
 			// Fill channel if needed
 			if tt.fillChannel {
 				if connID, ok := tt.msg["id"].(string); ok {
-					client.msgChansMu.RLock()
-					ch, exists := client.msgChans[connID]
-					client.msgChansMu.RUnlock()
+					ch, exists := client.connMgr.GetMessageChannel(connID)
 					if exists {
 						ch <- map[string]interface{}{"dummy": "message"}
 					}
@@ -150,9 +151,7 @@ func TestRouteMessage(t *testing.T) {
 
 			// Verify channel creation
 			if connID, ok := tt.msg["id"].(string); ok {
-				client.msgChansMu.RLock()
-				msgChan, hasChannel := client.msgChans[connID]
-				client.msgChansMu.RUnlock()
+				msgChan, hasChannel := client.connMgr.GetMessageChannel(connID)
 				if tt.expectChannelCreated && !hasChannel {
 					t.Error("Expected channel to be created")
 				}
@@ -253,8 +252,8 @@ func TestHandleDataMessage(t *testing.T) {
 				config: &config.ClientConfig{
 					ClientID: "test-client",
 				},
-				conns: make(map[string]net.Conn),
-				ctx:   context.Background(),
+				connMgr: connection.NewConnectionManager("test-client"),
+				ctx:     context.Background(),
 			}
 
 			// Create mock connection if needed
@@ -264,9 +263,7 @@ func TestHandleDataMessage(t *testing.T) {
 					writeErr: tt.writeErr,
 				}
 				if connID, ok := tt.msg["id"].(string); ok {
-					client.connsMu.Lock()
-					client.conns[connID] = mockConn
-					client.connsMu.Unlock()
+					client.connMgr.AddConnection(connID, mockConn)
 				}
 			}
 
@@ -329,14 +326,12 @@ func TestHandleCloseMessage(t *testing.T) {
 				config: &config.ClientConfig{
 					ClientID: "test-client",
 				},
-				conns: make(map[string]net.Conn),
+				connMgr: connection.NewConnectionManager("test-client"),
 			}
 
 			// Add connection if needed
 			if tt.hasConnection && tt.expectedConnID != "" {
-				client.connsMu.Lock()
-				client.conns[tt.expectedConnID] = &mockNetConn{id: tt.expectedConnID}
-				client.connsMu.Unlock()
+				client.connMgr.AddConnection(tt.expectedConnID, &mockNetConn{id: tt.expectedConnID})
 			}
 
 			// Handle close message
@@ -344,9 +339,7 @@ func TestHandleCloseMessage(t *testing.T) {
 
 			// Verify connection was cleaned up
 			if tt.hasConnection && tt.expectedConnID != "" {
-				client.connsMu.RLock()
-				_, exists := client.conns[tt.expectedConnID]
-				client.connsMu.RUnlock()
+				_, exists := client.connMgr.GetConnection(tt.expectedConnID)
 				if exists {
 					t.Error("Expected connection to be cleaned up")
 				}
@@ -361,8 +354,9 @@ func TestCreateMessageChannel(t *testing.T) {
 		config: &config.ClientConfig{
 			ClientID: "test-client",
 		},
-		msgChans: make(map[string]chan map[string]interface{}),
-		ctx:      context.Background(),
+		connMgr: connection.NewConnectionManager("test-client"),
+		ctx:     context.Background(),
+		wg:      sync.WaitGroup{},
 	}
 
 	// Test creating new channel
@@ -370,9 +364,7 @@ func TestCreateMessageChannel(t *testing.T) {
 	client.createMessageChannel(connID)
 
 	// Verify channel created
-	client.msgChansMu.RLock()
-	_, exists := client.msgChans[connID]
-	client.msgChansMu.RUnlock()
+	_, exists := client.connMgr.GetMessageChannel(connID)
 	if !exists {
 		t.Error("Message channel not created")
 	}
@@ -381,9 +373,7 @@ func TestCreateMessageChannel(t *testing.T) {
 	client.createMessageChannel(connID)
 
 	// Should still have only one channel
-	client.msgChansMu.RLock()
-	newChannelCount := len(client.msgChans)
-	client.msgChansMu.RUnlock()
+	newChannelCount := client.connMgr.GetMessageChannelCount()
 	if newChannelCount != 1 {
 		t.Errorf("Expected 1 channel, got %d", newChannelCount)
 	}
@@ -400,16 +390,16 @@ func TestProcessConnectionMessages(t *testing.T) {
 		{
 			name: "process multiple messages",
 			messages: []map[string]interface{}{
-				{"type": common.MsgTypeConnect, "id": "conn-1"},
-				{"type": common.MsgTypeData, "id": "conn-1", "data": []byte("test")},
-				{"type": common.MsgTypeClose, "id": "conn-1"},
+				{"type": protocol.MsgTypeConnect, "id": "conn-1"},
+				{"type": protocol.MsgTypeData, "id": "conn-1", "data": []byte("test")},
+				{"type": protocol.MsgTypeClose, "id": "conn-1"},
 			},
 			expectProcessed: 3,
 		},
 		{
 			name: "channel closed",
 			messages: []map[string]interface{}{
-				{"type": common.MsgTypeData, "id": "conn-1", "data": []byte("test")},
+				{"type": protocol.MsgTypeData, "id": "conn-1", "data": []byte("test")},
 			},
 			closeChannel:    true,
 			expectProcessed: 1,
@@ -417,7 +407,7 @@ func TestProcessConnectionMessages(t *testing.T) {
 		{
 			name: "context cancelled",
 			messages: []map[string]interface{}{
-				{"type": common.MsgTypeData, "id": "conn-1", "data": []byte("test")},
+				{"type": protocol.MsgTypeData, "id": "conn-1", "data": []byte("test")},
 			},
 			cancelContext:   true,
 			expectProcessed: 0,
@@ -434,9 +424,8 @@ func TestProcessConnectionMessages(t *testing.T) {
 				config: &config.ClientConfig{
 					ClientID: "test-client",
 				},
-				ctx:      ctx,
-				conns:    make(map[string]net.Conn),
-				msgChans: make(map[string]chan map[string]interface{}),
+				ctx:     ctx,
+				connMgr: connection.NewConnectionManager("test-client"),
 			}
 
 			// Create message channel
@@ -524,6 +513,8 @@ func TestSendConnectResponse(t *testing.T) {
 				},
 				conn: mockConn,
 			}
+			// Initialize msgHandler
+			client.msgHandler = message.NewClientExtendedMessageHandler(mockConn)
 
 			// Send connect response
 			err := client.sendConnectResponse(tt.connID, tt.success, tt.errorMsg)

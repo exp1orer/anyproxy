@@ -5,7 +5,8 @@ import (
 	"net"
 	"testing"
 
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/message"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
 )
 
 // mockConnForHandler implements a minimal connection for message handler testing
@@ -62,9 +63,9 @@ func TestReadNextMessage(t *testing.T) {
 	}{
 		{
 			name:       "binary data message",
-			readData:   common.PackDataMessage("conn-1", []byte("test data")),
+			readData:   protocol.PackDataMessage("conn-1", []byte("test data")),
 			expectErr:  false,
-			expectType: common.MsgTypeData,
+			expectType: protocol.MsgTypeData,
 			validate: func(t *testing.T, msg map[string]interface{}) {
 				if msg["id"] != "conn-1" {
 					t.Errorf("Expected id 'conn-1', got %v", msg["id"])
@@ -79,9 +80,9 @@ func TestReadNextMessage(t *testing.T) {
 		},
 		{
 			name:       "binary connect message",
-			readData:   common.PackConnectMessage("conn-2", "tcp", "example.com:80"),
+			readData:   protocol.PackConnectMessage("conn-2", "tcp", "example.com:80"),
 			expectErr:  false,
-			expectType: common.MsgTypeConnect,
+			expectType: protocol.MsgTypeConnect,
 			validate: func(t *testing.T, msg map[string]interface{}) {
 				if msg["id"] != "conn-2" {
 					t.Errorf("Expected id 'conn-2', got %v", msg["id"])
@@ -96,9 +97,9 @@ func TestReadNextMessage(t *testing.T) {
 		},
 		{
 			name:       "binary close message",
-			readData:   common.PackCloseMessage("conn-3"),
+			readData:   protocol.PackCloseMessage("conn-3"),
 			expectErr:  false,
-			expectType: common.MsgTypeClose,
+			expectType: protocol.MsgTypeClose,
 			validate: func(t *testing.T, msg map[string]interface{}) {
 				if msg["id"] != "conn-3" {
 					t.Errorf("Expected id 'conn-3', got %v", msg["id"])
@@ -107,7 +108,7 @@ func TestReadNextMessage(t *testing.T) {
 		},
 		{
 			name: "binary port forward response",
-			readData: common.PackPortForwardResponseMessage(true, "", []common.PortForwardStatus{
+			readData: protocol.PackPortForwardResponseMessage(true, "", []protocol.PortForwardStatus{
 				{Port: 8080, Success: true},
 				{Port: 8081, Success: false},
 			}),
@@ -149,12 +150,15 @@ func TestReadNextMessage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create client with mock connection
-			client := &Client{
-				conn: &mockConnForHandler{
-					readData: tt.readData,
-					readErr:  tt.readErr,
-				},
+			mockConn := &mockConnForHandler{
+				readData: tt.readData,
+				readErr:  tt.readErr,
 			}
+			client := &Client{
+				conn: mockConn,
+			}
+			// Initialize msgHandler
+			client.msgHandler = message.NewClientExtendedMessageHandler(mockConn)
 
 			// Read message
 			msg, err := client.readNextMessage()
@@ -228,6 +232,8 @@ func TestWriteDataMessage(t *testing.T) {
 			client := &Client{
 				conn: mockConn,
 			}
+			// Initialize msgHandler
+			client.msgHandler = message.NewClientExtendedMessageHandler(mockConn)
 
 			// Write data message
 			err := client.writeDataMessage(tt.connID, tt.data)
@@ -240,20 +246,20 @@ func TestWriteDataMessage(t *testing.T) {
 			// Verify binary message was written
 			if !tt.expectErr && mockConn.writeData != nil {
 				// Unpack and verify
-				version, msgType, payload, err := common.UnpackBinaryHeader(mockConn.writeData)
+				version, msgType, payload, err := protocol.UnpackBinaryHeader(mockConn.writeData)
 				if err != nil {
 					t.Fatalf("Failed to unpack written message: %v", err)
 				}
 
-				if version != common.BinaryProtocolVersion {
-					t.Errorf("Expected version %d, got %d", common.BinaryProtocolVersion, version)
+				if version != protocol.BinaryProtocolVersion {
+					t.Errorf("Expected version %d, got %d", protocol.BinaryProtocolVersion, version)
 				}
 
-				if msgType != common.BinaryMsgTypeData {
-					t.Errorf("Expected message type %d, got %d", common.BinaryMsgTypeData, msgType)
+				if msgType != protocol.BinaryMsgTypeData {
+					t.Errorf("Expected message type %d, got %d", protocol.BinaryMsgTypeData, msgType)
 				}
 
-				unpackedConnID, unpackedData, err := common.UnpackDataMessage(payload)
+				unpackedConnID, unpackedData, err := protocol.UnpackDataMessage(payload)
 				if err != nil {
 					t.Fatalf("Failed to unpack data message: %v", err)
 				}
@@ -313,6 +319,8 @@ func TestWriteConnectResponse(t *testing.T) {
 			client := &Client{
 				conn: mockConn,
 			}
+			// Initialize msgHandler
+			client.msgHandler = message.NewClientExtendedMessageHandler(mockConn)
 
 			// Write connect response
 			err := client.writeConnectResponse(tt.connID, tt.success, tt.errorMsg)
@@ -325,16 +333,16 @@ func TestWriteConnectResponse(t *testing.T) {
 			// Verify binary message was written
 			if !tt.expectErr && mockConn.writeData != nil {
 				// Unpack and verify
-				_, msgType, payload, err := common.UnpackBinaryHeader(mockConn.writeData)
+				_, msgType, payload, err := protocol.UnpackBinaryHeader(mockConn.writeData)
 				if err != nil {
 					t.Fatalf("Failed to unpack written message: %v", err)
 				}
 
-				if msgType != common.BinaryMsgTypeConnectResponse {
-					t.Errorf("Expected message type %d, got %d", common.BinaryMsgTypeConnectResponse, msgType)
+				if msgType != protocol.BinaryMsgTypeConnectResponse {
+					t.Errorf("Expected message type %d, got %d", protocol.BinaryMsgTypeConnectResponse, msgType)
 				}
 
-				unpackedConnID, unpackedSuccess, unpackedError, err := common.UnpackConnectResponseMessage(payload)
+				unpackedConnID, unpackedSuccess, unpackedError, err := protocol.UnpackConnectResponseMessage(payload)
 				if err != nil {
 					t.Fatalf("Failed to unpack connect response: %v", err)
 				}
@@ -386,6 +394,8 @@ func TestWriteCloseMessage(t *testing.T) {
 			client := &Client{
 				conn: mockConn,
 			}
+			// Initialize msgHandler
+			client.msgHandler = message.NewClientExtendedMessageHandler(mockConn)
 
 			// Write close message
 			err := client.writeCloseMessage(tt.connID)
@@ -398,16 +408,16 @@ func TestWriteCloseMessage(t *testing.T) {
 			// Verify binary message was written
 			if !tt.expectErr && mockConn.writeData != nil {
 				// Unpack and verify
-				_, msgType, payload, err := common.UnpackBinaryHeader(mockConn.writeData)
+				_, msgType, payload, err := protocol.UnpackBinaryHeader(mockConn.writeData)
 				if err != nil {
 					t.Fatalf("Failed to unpack written message: %v", err)
 				}
 
-				if msgType != common.BinaryMsgTypeClose {
-					t.Errorf("Expected message type %d, got %d", common.BinaryMsgTypeClose, msgType)
+				if msgType != protocol.BinaryMsgTypeClose {
+					t.Errorf("Expected message type %d, got %d", protocol.BinaryMsgTypeClose, msgType)
 				}
 
-				unpackedConnID, err := common.UnpackCloseMessage(payload)
+				unpackedConnID, err := protocol.UnpackCloseMessage(payload)
 				if err != nil {
 					t.Fatalf("Failed to unpack close message: %v", err)
 				}

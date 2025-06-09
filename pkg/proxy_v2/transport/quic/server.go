@@ -10,7 +10,7 @@ import (
 	"github.com/quic-go/quic-go"
 
 	"github.com/buhuipao/anyproxy/pkg/logger"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
@@ -210,26 +210,25 @@ func (t *quicTransport) authenticateConnection(stream quic.Stream) (clientID, gr
 		return "", "", fmt.Errorf("authentication timeout")
 	}
 
-	// 检查是否是二进制协议消息
-	if !common.IsBinaryMessage(authData) {
+	// 验证是否为二进制协议消息
+	if !protocol.IsBinaryMessage(authData) {
 		return "", "", fmt.Errorf("received non-binary auth message")
 	}
 
-	// 解析二进制认证消息
-	version, msgType, data, err := common.UnpackBinaryHeader(authData)
+	// 解析二进制消息头
+	version, msgType, data, err := protocol.UnpackBinaryHeader(authData)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to unpack auth message: %v", err)
 	}
 
 	_ = version // 暂时不使用版本号
 
-	if msgType != common.BinaryMsgTypeAuth {
+	if msgType != protocol.BinaryMsgTypeAuth {
 		return "", "", fmt.Errorf("expected auth message, got: 0x%02x", msgType)
 	}
 
-	// 解包认证消息
-	var username, password string
-	clientID, groupID, username, password, err = common.UnpackAuthMessage(data)
+	// 解析认证消息
+	clientID, groupID, username, password, err := protocol.UnpackAuthMessage(data)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to parse auth message: %v", err)
 	}
@@ -252,8 +251,8 @@ func (t *quicTransport) authenticateConnection(stream quic.Stream) (clientID, gr
 		responseStatus = "success"
 	}
 
-	// 发送认证响应（使用二进制格式）
-	authResponse := common.PackAuthResponseMessage(responseStatus, responseReason)
+	// 构建响应消息
+	authResponse := protocol.PackAuthResponseMessage(responseStatus, responseReason)
 	if writeErr := tempConn.writeData(authResponse); writeErr != nil {
 		return "", "", fmt.Errorf("failed to send auth response: %v", writeErr)
 	}
@@ -309,5 +308,5 @@ func generateSelfSignedCert() (tls.Certificate, error) {
 // Register the transport creator
 func init() {
 	// 修复：使用明确的常量进行注册
-	transport.RegisterTransportCreator(common.TransportTypeQUIC, NewQUICTransportWithAuth)
+	transport.RegisterTransportCreator(protocol.TransportTypeQUIC, NewQUICTransportWithAuth)
 }

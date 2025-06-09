@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/buhuipao/anyproxy/pkg/config"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/connection"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/monitoring"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
@@ -307,10 +309,9 @@ func TestCloseAllConnections(t *testing.T) {
 	}
 
 	client := &Client{
-		config:   config,
-		conns:    make(map[string]net.Conn),
-		msgChans: make(map[string]chan map[string]interface{}),
-		ctx:      context.Background(),
+		config:  config,
+		connMgr: connection.NewConnectionManager(config.ClientID),
+		ctx:     context.Background(),
 	}
 
 	// Create mock connections
@@ -320,11 +321,10 @@ func TestCloseAllConnections(t *testing.T) {
 
 		// Add mock connection
 		mockConn := &mockNetConn{id: connID}
-		client.conns[connID] = mockConn
+		client.connMgr.AddConnection(connID, mockConn)
 
 		// Add message channel
-		msgChan := make(chan map[string]interface{}, 1)
-		client.msgChans[connID] = msgChan
+		msgChan := client.connMgr.CreateMessageChannel(connID, protocol.DefaultMessageChannelSize)
 
 		// Add test message to channel
 		msgChan <- map[string]interface{}{"test": "data"}
@@ -334,13 +334,13 @@ func TestCloseAllConnections(t *testing.T) {
 	client.closeAllConnections()
 
 	// Verify all connections are closed
-	if len(client.conns) != 0 {
-		t.Errorf("Expected 0 connections after closeAllConnections, got %d", len(client.conns))
+	if client.connMgr.GetConnectionCount() != 0 {
+		t.Errorf("Expected 0 connections after closeAllConnections, got %d", client.connMgr.GetConnectionCount())
 	}
 
-	// Verify all message channels are closed and empty
-	if len(client.msgChans) != 0 {
-		t.Errorf("Expected 0 message channels after closeAllConnections, got %d", len(client.msgChans))
+	// Verify all message channels are closed
+	if client.connMgr.GetMessageChannelCount() != 0 {
+		t.Errorf("Expected 0 message channels after closeAllConnections, got %d", client.connMgr.GetMessageChannelCount())
 	}
 }
 
@@ -447,8 +447,7 @@ func TestHandleConnection(t *testing.T) {
 
 			client := &Client{
 				config:           config,
-				conns:            make(map[string]net.Conn),
-				msgChans:         make(map[string]chan map[string]interface{}),
+				connMgr:          connection.NewConnectionManager(config.ClientID),
 				ctx:              context.Background(),
 				forbiddenHostsRe: []*regexp.Regexp{},
 			}
@@ -468,8 +467,7 @@ func TestHandleConnection(t *testing.T) {
 			client.conn = mockConn
 
 			// Create message channel
-			msgChan := make(chan map[string]interface{}, 10)
-			client.msgChans[tt.connID] = msgChan
+			msgChan := client.connMgr.CreateMessageChannel(tt.connID, protocol.DefaultMessageChannelSize)
 
 			// Send connect message
 			msgChan <- map[string]interface{}{
@@ -506,7 +504,7 @@ func TestHandleConnection(t *testing.T) {
 			}
 
 			// Verify cleanup
-			if _, exists := client.conns[tt.connID]; exists && tt.expectClose {
+			if _, exists := client.connMgr.GetConnection(tt.connID); exists && tt.expectClose {
 				t.Error("Connection was not cleaned up")
 			}
 		})
@@ -519,31 +517,29 @@ func TestCleanupConnection(t *testing.T) {
 		config: &config.ClientConfig{
 			ClientID: "test-client",
 		},
-		conns:    make(map[string]net.Conn),
-		msgChans: make(map[string]chan map[string]interface{}),
+		connMgr: connection.NewConnectionManager("test-client"),
 	}
 
 	// Test cleanup of existing connection
 	connID := "test-conn"
 	mockConn := &mockNetConn{id: connID}
-	client.conns[connID] = mockConn
+	client.connMgr.AddConnection(connID, mockConn)
 
-	msgChan := make(chan map[string]interface{}, 1)
-	client.msgChans[connID] = msgChan
+	client.connMgr.CreateMessageChannel(connID, protocol.DefaultMessageChannelSize)
 
 	// Add connection metrics
-	common.IncrementActiveConnections()
+	monitoring.IncrementActiveConnections()
 
 	// Cleanup connection
 	client.cleanupConnection(connID)
 
 	// Verify connection removed
-	if _, exists := client.conns[connID]; exists {
+	if _, exists := client.connMgr.GetConnection(connID); exists {
 		t.Error("Connection not removed from map")
 	}
 
 	// Verify channel removed
-	if _, exists := client.msgChans[connID]; exists {
+	if client.connMgr.GetMessageChannelCount() != 0 {
 		t.Error("Message channel not removed from map")
 	}
 
@@ -562,9 +558,8 @@ func TestConnectionConcurrency(t *testing.T) {
 		config: &config.ClientConfig{
 			ClientID: "test-client",
 		},
-		conns:    make(map[string]net.Conn),
-		msgChans: make(map[string]chan map[string]interface{}),
-		ctx:      context.Background(),
+		connMgr: connection.NewConnectionManager("test-client"),
+		ctx:     context.Background(),
 	}
 
 	// Test concurrent access to connections
@@ -582,14 +577,10 @@ func TestConnectionConcurrency(t *testing.T) {
 				connID := fmt.Sprintf("conn-%d-%d", routineID, j)
 
 				// Add connection
-				client.connsMu.Lock()
-				client.conns[connID] = &mockNetConn{id: connID}
-				client.connsMu.Unlock()
+				client.connMgr.AddConnection(connID, &mockNetConn{id: connID})
 
 				// Add message channel
-				client.msgChansMu.Lock()
-				client.msgChans[connID] = make(chan map[string]interface{})
-				client.msgChansMu.Unlock()
+				client.connMgr.CreateMessageChannel(connID, protocol.DefaultMessageChannelSize)
 
 				// Simulate some work
 				time.Sleep(time.Millisecond)
@@ -603,11 +594,11 @@ func TestConnectionConcurrency(t *testing.T) {
 	wg.Wait()
 
 	// Verify all connections cleaned up
-	if len(client.conns) != 0 {
-		t.Errorf("Expected 0 connections after concurrent cleanup, got %d", len(client.conns))
+	if client.connMgr.GetConnectionCount() != 0 {
+		t.Errorf("Expected 0 connections after concurrent cleanup, got %d", client.connMgr.GetConnectionCount())
 	}
 
-	if len(client.msgChans) != 0 {
-		t.Errorf("Expected 0 message channels after concurrent cleanup, got %d", len(client.msgChans))
+	if client.connMgr.GetMessageChannelCount() != 0 {
+		t.Errorf("Expected 0 message channels after concurrent cleanup, got %d", client.connMgr.GetMessageChannelCount())
 	}
 }

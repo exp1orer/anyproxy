@@ -2,7 +2,7 @@ package client
 
 import (
 	"github.com/buhuipao/anyproxy/pkg/logger"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
 )
 
 // sendPortForwardingRequest 发送端口转发请求 (与 v1 相同)
@@ -14,9 +14,9 @@ func (c *Client) sendPortForwardingRequest() error {
 	logger.Debug("Preparing port forwarding request", "client_id", c.getClientID(), "port_count", len(c.config.OpenPorts))
 
 	// 构建端口配置列表
-	ports := make([]common.PortConfig, 0, len(c.config.OpenPorts))
+	ports := make([]protocol.PortConfig, 0, len(c.config.OpenPorts))
 	for _, port := range c.config.OpenPorts {
-		ports = append(ports, common.PortConfig{
+		ports = append(ports, protocol.PortConfig{
 			RemotePort: port.RemotePort,
 			LocalPort:  port.LocalPort,
 			LocalHost:  port.LocalHost,
@@ -25,7 +25,7 @@ func (c *Client) sendPortForwardingRequest() error {
 	}
 
 	// 使用二进制格式发送端口转发请求
-	binaryMsg := common.PackPortForwardMessage(c.getClientID(), ports)
+	binaryMsg := protocol.PackPortForwardMessage(c.getClientID(), ports)
 	return c.conn.WriteMessage(binaryMsg)
 }
 
