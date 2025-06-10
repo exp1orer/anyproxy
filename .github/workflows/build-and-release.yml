@@ -215,28 +215,53 @@ jobs:
     - name: Extract release notes
       id: extract_notes
       run: |
-        # Extract version from tag
         VERSION=${GITHUB_REF#refs/tags/}
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         
-        # Simple release notes
-        echo "AnyProxy $VERSION" > release_notes.md
-        echo "" >> release_notes.md
-        echo "## Features" >> release_notes.md
-        echo "- Secure tunneling with WebSocket, gRPC, and QUIC transports" >> release_notes.md
-        echo "- HTTP/HTTPS and SOCKS5 proxy support" >> release_notes.md
-        echo "- Group-based routing and port forwarding" >> release_notes.md
-        echo "" >> release_notes.md
-        echo "See [README.md](README.md) for usage instructions." >> release_notes.md
+        # Create detailed release notes
+        cat << EOF > release_notes.md
+        # AnyProxy $VERSION
+        
+        ## Features
+        - Secure tunneling with WebSocket, gRPC, and QUIC transports
+        - HTTP/HTTPS and SOCKS5 proxy support
+        - Group-based routing and port forwarding
+        
+        ## Installation
+        Download the appropriate binary for your system:
+        \`\`\`
+        # Linux amd64
+        curl -L https://github.com/your-repo/anyproxy/releases/download/$VERSION/anyproxy-linux-amd64.tar.gz | tar xz
+        
+        # macOS arm64
+        curl -L https://github.com/your-repo/anyproxy/releases/download/$VERSION/anyproxy-darwin-arm64.tar.gz | tar xz
+        \`\`\`
+        
+        ## Checksums
+        \`\`\`txt
+        $(cat release/checksums.txt)
+        \`\`\`
+        
+        See [README.md](https://github.com/your-repo/anyproxy#readme) for full documentation.
+        EOF
 
-    - name: Create Release
-      uses: softprops/action-gh-release@v2
-      with:
-        name: Release ${{ steps.extract_notes.outputs.version }}
-        body_path: release_notes.md
-        files: |
+    - name: Install GitHub CLI
+      run: sudo apt-get update && sudo apt-get install -y gh
+  
+    - name: Authenticate GitHub CLI
+      run: gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
+  
+    - name: Create Release and Upload Assets
+      run: |
+        VERSION="${{ steps.extract_notes.outputs.version }}"
+        PRERELEASE=$([[ "$VERSION" =~ (alpha|beta|rc) ]] && echo "true" || echo "false")
+        
+        # Create release
+        gh release create $VERSION \
+          --title "AnyProxy $VERSION" \
+          --notes-file release_notes.md \
+          --prerelease=$PRERELEASE \
           release/*
-        draft: false
-        prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+        echo "✅ Successfully released AnyProxy $VERSION"
+  
