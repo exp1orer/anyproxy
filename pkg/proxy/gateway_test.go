@@ -212,7 +212,7 @@ func TestGateway_GetRandomClient(t *testing.T) {
 	gateway.groups[""] = make(map[string]struct{})
 
 	// Test no clients available
-	_, err := gateway.getRandomClient()
+	_, err := gateway.getClientByGroup("")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no clients available")
 
@@ -224,7 +224,7 @@ func TestGateway_GetRandomClient(t *testing.T) {
 	gateway.addClient(client)
 
 	// Test getting client
-	randomClient, err := gateway.getRandomClient()
+	randomClient, err := gateway.getClientByGroup("")
 	assert.NoError(t, err)
 	assert.Equal(t, client, randomClient)
 }

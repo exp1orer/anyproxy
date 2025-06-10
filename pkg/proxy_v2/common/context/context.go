@@ -1,3 +1,6 @@
+// Package context provides context utilities and connection-related context management
+// for the anyproxy v2 system. It includes context keys, connection ID management,
+// and other context-aware functionality.
 package context
 
 import (

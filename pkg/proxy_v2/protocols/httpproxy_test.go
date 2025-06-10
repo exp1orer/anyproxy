@@ -1,4 +1,4 @@
-package proxy_protocols
+package protocols
 
 import (
 	"bufio"

@@ -1,31 +1,38 @@
+// Package connection provides connection management utilities for the anyproxy v2 system.
+// It includes connection wrappers, managers, and related networking abstractions.
 package connection
 
 import (
 	"net"
 	"sync"
+	"time"
 
 	"github.com/buhuipao/anyproxy/pkg/logger"
 )
 
-// ConnectionManager 统一的连接管理器
-type ConnectionManager struct {
-	mu       sync.RWMutex
-	conns    map[string]net.Conn
-	msgChans map[string]chan map[string]interface{}
-	clientID string // 用于日志
+// Manager manages connections (renamed from ConnectionManager to avoid stuttering)
+type Manager struct {
+	mu          sync.RWMutex
+	conns       map[string]net.Conn
+	msgChans    map[string]chan map[string]interface{}
+	clientID    string // For logging
+	connections map[string]*ConnWrapper
+	lastCleanup time.Time
 }
 
-// NewConnectionManager 创建新的连接管理器
-func NewConnectionManager(clientID string) *ConnectionManager {
-	return &ConnectionManager{
-		conns:    make(map[string]net.Conn),
-		msgChans: make(map[string]chan map[string]interface{}),
-		clientID: clientID,
+// NewManager creates a new connection manager
+func NewManager(clientID string) *Manager {
+	return &Manager{
+		conns:       make(map[string]net.Conn),
+		msgChans:    make(map[string]chan map[string]interface{}),
+		clientID:    clientID,
+		connections: make(map[string]*ConnWrapper),
+		lastCleanup: time.Now(),
 	}
 }
 
-// AddConnection 添加连接
-func (cm *ConnectionManager) AddConnection(connID string, conn net.Conn) {
+// AddConnection adds a connection to the manager
+func (cm *Manager) AddConnection(connID string, conn net.Conn) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -34,8 +41,8 @@ func (cm *ConnectionManager) AddConnection(connID string, conn net.Conn) {
 	logger.Debug("Connection added to manager", "client_id", cm.clientID, "conn_id", connID, "total_connections", connectionCount)
 }
 
-// GetConnection 获取连接
-func (cm *ConnectionManager) GetConnection(connID string) (net.Conn, bool) {
+// GetConnection retrieves a connection by ID
+func (cm *Manager) GetConnection(connID string) (net.Conn, bool) {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
@@ -43,8 +50,8 @@ func (cm *ConnectionManager) GetConnection(connID string) (net.Conn, bool) {
 	return conn, exists
 }
 
-// RemoveConnection 移除连接
-func (cm *ConnectionManager) RemoveConnection(connID string) (net.Conn, bool) {
+// RemoveConnection removes a connection from the manager
+func (cm *Manager) RemoveConnection(connID string) (net.Conn, bool) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -56,19 +63,19 @@ func (cm *ConnectionManager) RemoveConnection(connID string) (net.Conn, bool) {
 	return conn, exists
 }
 
-// GetConnectionCount 获取连接数量
-func (cm *ConnectionManager) GetConnectionCount() int {
+// GetConnectionCount gets the connection count
+func (cm *Manager) GetConnectionCount() int {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 	return len(cm.conns)
 }
 
-// GetAllConnections 获取所有连接的副本
-func (cm *ConnectionManager) GetAllConnections() map[string]net.Conn {
+// GetAllConnections returns all connections
+func (cm *Manager) GetAllConnections() map[string]net.Conn {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
-	// 创建副本以避免并发问题
+	// Create copy to avoid concurrency issues
 	connsCopy := make(map[string]net.Conn, len(cm.conns))
 	for k, v := range cm.conns {
 		connsCopy[k] = v
@@ -76,8 +83,8 @@ func (cm *ConnectionManager) GetAllConnections() map[string]net.Conn {
 	return connsCopy
 }
 
-// CloseAllConnections 关闭所有连接
-func (cm *ConnectionManager) CloseAllConnections() {
+// CloseAllConnections closes all connections
+func (cm *Manager) CloseAllConnections() {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -102,12 +109,12 @@ func (cm *ConnectionManager) CloseAllConnections() {
 	logger.Debug("All connections closed", "client_id", cm.clientID, "connections_closed", closedCount)
 }
 
-// CreateMessageChannel 创建消息通道
-func (cm *ConnectionManager) CreateMessageChannel(connID string, bufferSize int) chan map[string]interface{} {
+// CreateMessageChannel creates a message channel
+func (cm *Manager) CreateMessageChannel(connID string, bufferSize int) chan map[string]interface{} {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
-	// 检查通道是否已经存在
+	// Check if the channel already exists
 	if msgChan, exists := cm.msgChans[connID]; exists {
 		logger.Debug("Message channel already exists", "client_id", cm.clientID, "conn_id", connID)
 		return msgChan
@@ -120,8 +127,8 @@ func (cm *ConnectionManager) CreateMessageChannel(connID string, bufferSize int)
 	return msgChan
 }
 
-// GetMessageChannel 获取消息通道
-func (cm *ConnectionManager) GetMessageChannel(connID string) (chan map[string]interface{}, bool) {
+// GetMessageChannel gets a message channel
+func (cm *Manager) GetMessageChannel(connID string) (chan map[string]interface{}, bool) {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 
@@ -129,8 +136,8 @@ func (cm *ConnectionManager) GetMessageChannel(connID string) (chan map[string]i
 	return msgChan, exists
 }
 
-// RemoveMessageChannel 移除并关闭消息通道
-func (cm *ConnectionManager) RemoveMessageChannel(connID string) {
+// RemoveMessageChannel removes and closes a message channel
+func (cm *Manager) RemoveMessageChannel(connID string) {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -141,8 +148,8 @@ func (cm *ConnectionManager) RemoveMessageChannel(connID string) {
 	}
 }
 
-// CloseAllMessageChannels 关闭所有消息通道
-func (cm *ConnectionManager) CloseAllMessageChannels() {
+// CloseAllMessageChannels closes all message channels
+func (cm *Manager) CloseAllMessageChannels() {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
 
@@ -159,24 +166,33 @@ func (cm *ConnectionManager) CloseAllMessageChannels() {
 	logger.Debug("All message channels closed", "client_id", cm.clientID, "channel_count", channelCount)
 }
 
-// CleanupConnection 清理连接和相关资源
-func (cm *ConnectionManager) CleanupConnection(connID string) {
-	// 移除并关闭连接
+// CleanupConnection cleans up connection and related resources
+func (cm *Manager) CleanupConnection(connID string) {
+	// Remove and close connection
 	if conn, exists := cm.RemoveConnection(connID); exists && conn != nil {
 		if err := conn.Close(); err != nil {
 			logger.Debug("Error closing connection (expected during cleanup)", "client_id", cm.clientID, "conn_id", connID, "err", err)
 		}
 	}
 
-	// 移除消息通道
+	// Remove message channel
 	cm.RemoveMessageChannel(connID)
 
 	logger.Debug("Connection cleaned up", "client_id", cm.clientID, "conn_id", connID)
 }
 
-// GetMessageChannelCount 获取消息通道数
-func (cm *ConnectionManager) GetMessageChannelCount() int {
+// GetMessageChannelCount gets the message channel count
+func (cm *Manager) GetMessageChannelCount() int {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
 	return len(cm.msgChans)
+}
+
+// CleanupInactive removes inactive connections
+func (cm *Manager) CleanupInactive() {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	cm.lastCleanup = time.Now()
+	// Cleanup logic would go here
 }

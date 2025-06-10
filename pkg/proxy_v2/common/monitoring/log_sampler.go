@@ -1,3 +1,5 @@
+// Package monitoring provides logging, metrics, and monitoring utilities for the anyproxy v2 system.
+// It includes log sampling, performance monitoring, and other observability features.
 package monitoring
 
 import (
@@ -5,47 +7,47 @@ import (
 	"time"
 )
 
-// LogSampler 日志采样器，用于减少高频日志
+// LogSampler log sampler for reducing high-frequency logs
 type LogSampler struct {
 	counter  uint64
-	interval uint64 // 每隔多少次记录一次
+	interval uint64 // How often to record logs
 }
 
-// NewLogSampler 创建日志采样器
+// NewLogSampler creates a log sampler
 func NewLogSampler(interval uint64) *LogSampler {
 	if interval == 0 {
-		interval = 1000 // 默认每1000次记录一次
+		interval = 1000 // Default: record once every 1000 times
 	}
 	return &LogSampler{
 		interval: interval,
 	}
 }
 
-// ShouldLog 判断是否应该记录日志
+// ShouldLog determines whether to record logs
 func (s *LogSampler) ShouldLog() bool {
 	count := atomic.AddUint64(&s.counter, 1)
 	return count%s.interval == 0
 }
 
-// Count 获取当前计数
+// Count gets the current count
 func (s *LogSampler) Count() uint64 {
 	return atomic.LoadUint64(&s.counter)
 }
 
-// RateLimiter 基于时间的限流器
+// RateLimiter time-based rate limiter
 type RateLimiter struct {
-	lastLog    int64 // 上次记录时间（纳秒）
-	intervalNs int64 // 间隔（纳秒）
+	lastLog    int64 // Last log time (nanoseconds)
+	intervalNs int64 // Interval (nanoseconds)
 }
 
-// NewRateLimiter 创建限流器
+// NewRateLimiter creates a rate limiter
 func NewRateLimiter(interval time.Duration) *RateLimiter {
 	return &RateLimiter{
 		intervalNs: interval.Nanoseconds(),
 	}
 }
 
-// ShouldLog 判断是否应该记录日志
+// ShouldLog determines whether to record logs
 func (r *RateLimiter) ShouldLog() bool {
 	now := time.Now().UnixNano()
 	last := atomic.LoadInt64(&r.lastLog)
@@ -54,34 +56,34 @@ func (r *RateLimiter) ShouldLog() bool {
 		return false
 	}
 
-	// 尝试更新时间戳
+	// Try to update timestamp
 	return atomic.CompareAndSwapInt64(&r.lastLog, last, now)
 }
 
-// 预定义的全局采样器
+// Predefined global samplers
 var (
-	dataSampler  = NewLogSampler(1000)         // 数据传输日志：每1000次记录一次
-	connSampler  = NewLogSampler(100)          // 连接日志：每100次记录一次
-	msgSampler   = NewLogSampler(100)          // 消息日志：每100次记录一次
-	errorLimiter = NewRateLimiter(time.Second) // 错误日志：每秒最多一次
+	dataSampler  = NewLogSampler(1000)         // Data transfer logs: record once every 1000 times
+	connSampler  = NewLogSampler(100)          // Connection logs: record once every 100 times
+	msgSampler   = NewLogSampler(100)          // Message logs: record once every 100 times
+	errorLimiter = NewRateLimiter(time.Second) // Error logs: maximum once per second
 )
 
-// ShouldLogData 判断是否应该记录数据传输日志
+// ShouldLogData determines whether to record data transfer logs
 func ShouldLogData() bool {
 	return dataSampler.ShouldLog()
 }
 
-// ShouldLogConnection 判断是否应该记录连接日志
+// ShouldLogConnection determines whether to record connection logs
 func ShouldLogConnection() bool {
 	return connSampler.ShouldLog()
 }
 
-// ShouldLogMessage 判断是否应该记录消息日志
+// ShouldLogMessage determines whether to record message logs
 func ShouldLogMessage() bool {
 	return msgSampler.ShouldLog()
 }
 
-// ShouldLogError 判断是否应该记录错误日志（限流）
+// ShouldLogError determines whether to record error logs (rate limited)
 func ShouldLogError() bool {
 	return errorLimiter.ShouldLog()
 }

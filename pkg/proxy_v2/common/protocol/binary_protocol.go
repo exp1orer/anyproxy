@@ -1,3 +1,5 @@
+// Package protocol defines the binary protocol specifications and utilities for the anyproxy v2 system.
+// It provides message packing/unpacking, protocol constants, and communication protocol implementations.
 package protocol
 
 import (
@@ -5,47 +7,47 @@ import (
 	"fmt"
 )
 
-// 二进制协议版本
+// Binary protocol version
 const (
 	BinaryProtocolVersion byte = 1
 )
 
-// 二进制消息类型定义
+// Binary message type definitions
 const (
-	// 控制消息类型 (0x00 - 0x0F)
-	BinaryMsgTypeConnect         byte = 0x01 // 连接请求
-	BinaryMsgTypeConnectResponse byte = 0x02 // 连接响应
-	BinaryMsgTypeClose           byte = 0x03 // 关闭连接
-	BinaryMsgTypePortForward     byte = 0x04 // 端口转发请求
-	BinaryMsgTypePortForwardResp byte = 0x05 // 端口转发响应
+	// Control message types (0x00 - 0x0F)
+	BinaryMsgTypeConnect         byte = 0x01 // Connection request
+	BinaryMsgTypeConnectResponse byte = 0x02 // Connection response
+	BinaryMsgTypeClose           byte = 0x03 // Close connection
+	BinaryMsgTypePortForward     byte = 0x04 // Port forwarding request
+	BinaryMsgTypePortForwardResp byte = 0x05 // Port forwarding response
 
-	// 认证消息类型 (0x06 - 0x0F)
-	BinaryMsgTypeAuth         byte = 0x06 // 认证请求
-	BinaryMsgTypeAuthResponse byte = 0x07 // 认证响应
+	// Authentication message types (0x06 - 0x0F)
+	BinaryMsgTypeAuth         byte = 0x06 // Authentication request
+	BinaryMsgTypeAuthResponse byte = 0x07 // Authentication response
 
-	// 数据消息类型 (0x10 - 0x1F)
-	BinaryMsgTypeData byte = 0x10 // 数据传输
+	// Data message types (0x10 - 0x1F)
+	BinaryMsgTypeData byte = 0x10 // Data transfer
 
-	// 预留类型 (0x20 - 0xFF)
+	// Reserved types (0x20 - 0xFF)
 )
 
-// 消息头大小
+// Message header sizes
 const (
-	BinaryHeaderSize = 2  // [版本:1字节][类型:1字节]
-	ConnIDSize       = 20 // xid 字符串长度
+	BinaryHeaderSize = 2  // [version:1byte][type:1byte]
+	ConnIDSize       = 20 // xid string length
 )
 
-// BinaryMessage 二进制消息基础结构
+// BinaryMessage binary message base structure
 type BinaryMessage struct {
-	Version byte   // 协议版本
-	Type    byte   // 消息类型
-	ConnID  string // 连接ID (20字符)
-	Data    []byte // 消息数据
+	Version byte   // Protocol version
+	Type    byte   // Message type
+	ConnID  string // Connection ID (20 characters)
+	Data    []byte // Message data
 }
 
-// PackBinaryMessage 打包任意类型的二进制消息
-// 格式: [版本:1][类型:1][数据:N]
-// 数据部分根据消息类型有不同的格式
+// PackBinaryMessage packs any type of binary message
+// Format: [version:1][type:1][data:N]
+// Data part has different formats based on message type
 func PackBinaryMessage(msgType byte, data []byte) []byte {
 	msg := make([]byte, BinaryHeaderSize+len(data))
 	msg[0] = BinaryProtocolVersion
@@ -54,7 +56,7 @@ func PackBinaryMessage(msgType byte, data []byte) []byte {
 	return msg
 }
 
-// UnpackBinaryHeader 解包消息头，返回版本、类型和数据部分
+// UnpackBinaryHeader unpacks message header, returns version, type and data part
 func UnpackBinaryHeader(msg []byte) (version, msgType byte, data []byte, err error) {
 	if len(msg) < BinaryHeaderSize {
 		return 0, 0, nil, fmt.Errorf("message too short: %d bytes", len(msg))
@@ -71,7 +73,7 @@ func UnpackBinaryHeader(msg []byte) (version, msgType byte, data []byte, err err
 	return version, msgType, data, nil
 }
 
-// IsBinaryMessage 检查是否是二进制协议消息
+// IsBinaryMessage checks if this is a binary protocol message
 func IsBinaryMessage(data []byte) bool {
 	if len(data) < BinaryHeaderSize {
 		return false
@@ -79,10 +81,10 @@ func IsBinaryMessage(data []byte) bool {
 	return data[0] == BinaryProtocolVersion
 }
 
-// --- 数据消息 (最高频) ---
-// 格式: [版本:1][类型:1][connID:20][数据:N]
+// --- Data messages (highest frequency) ---
+// Format: [version:1][type:1][connID:20][data:N]
 
-// PackDataMessage 打包数据消息
+// PackDataMessage packs data message
 func PackDataMessage(connID string, data []byte) []byte {
 	if len(connID) > ConnIDSize {
 		connID = connID[:ConnIDSize]
@@ -90,23 +92,23 @@ func PackDataMessage(connID string, data []byte) []byte {
 
 	payload := make([]byte, ConnIDSize+len(data))
 
-	// 复制 connID，不足部分补零
+	// Copy connID, pad with zeros if insufficient
 	connIDBytes := []byte(connID)
 	copy(payload[:ConnIDSize], connIDBytes)
 
-	// 复制数据
+	// Copy data
 	copy(payload[ConnIDSize:], data)
 
 	return PackBinaryMessage(BinaryMsgTypeData, payload)
 }
 
-// UnpackDataMessage 解包数据消息
+// UnpackDataMessage unpacks data message
 func UnpackDataMessage(data []byte) (connID string, payload []byte, err error) {
 	if len(data) < ConnIDSize {
 		return "", nil, fmt.Errorf("data message too short: %d bytes", len(data))
 	}
 
-	// 提取 connID (去除尾部零字节)
+	// Extract connID (remove trailing zero bytes)
 	connIDBytes := data[:ConnIDSize]
 	for i, b := range connIDBytes {
 		if b == 0 {
@@ -122,10 +124,10 @@ func UnpackDataMessage(data []byte) (connID string, payload []byte, err error) {
 	return connID, payload, nil
 }
 
-// --- 连接请求消息 ---
-// 格式: [版本:1][类型:1][connID:20][network长度:2][network:N][address长度:2][address:N]
+// --- Connection request messages ---
+// Format: [version:1][type:1][connID:20][network_length:2][network:N][address_length:2][address:N]
 
-// PackConnectMessage 打包连接请求
+// PackConnectMessage packs connection request
 func PackConnectMessage(connID, network, address string) []byte {
 	if len(connID) > ConnIDSize {
 		connID = connID[:ConnIDSize]
@@ -134,35 +136,35 @@ func PackConnectMessage(connID, network, address string) []byte {
 	networkBytes := []byte(network)
 	addressBytes := []byte(address)
 
-	// 计算总长度
+	// Calculate total length
 	totalLen := ConnIDSize + 2 + len(networkBytes) + 2 + len(addressBytes)
 	payload := make([]byte, totalLen)
 
 	offset := 0
 
-	// connID (固定20字节)
+	// connID (fixed 20 bytes)
 	copy(payload[offset:offset+ConnIDSize], []byte(connID))
 	offset += ConnIDSize
 
-	// network长度 (2字节)
+	// network length (2 bytes)
 	binary.BigEndian.PutUint16(payload[offset:], uint16(len(networkBytes))) //nolint:gosec // network is always short
 	offset += 2
 
-	// network内容
+	// network content
 	copy(payload[offset:], networkBytes)
 	offset += len(networkBytes)
 
-	// address长度 (2字节)
+	// address length (2 bytes)
 	binary.BigEndian.PutUint16(payload[offset:], uint16(len(addressBytes))) //nolint:gosec // address is always short
 	offset += 2
 
-	// address内容
+	// address content
 	copy(payload[offset:], addressBytes)
 
 	return PackBinaryMessage(BinaryMsgTypeConnect, payload)
 }
 
-// UnpackConnectMessage 解包连接请求
+// UnpackConnectMessage unpacks connection request
 func UnpackConnectMessage(data []byte) (connID, network, address string, err error) {
 	if len(data) < ConnIDSize+4 {
 		return "", "", "", fmt.Errorf("connect message too short: %d bytes", len(data))
@@ -170,7 +172,7 @@ func UnpackConnectMessage(data []byte) (connID, network, address string, err err
 
 	offset := 0
 
-	// 提取 connID
+	// Extract connID
 	connIDBytes := data[offset : offset+ConnIDSize]
 	for i, b := range connIDBytes {
 		if b == 0 {
@@ -183,7 +185,7 @@ func UnpackConnectMessage(data []byte) (connID, network, address string, err err
 	}
 	offset += ConnIDSize
 
-	// 提取 network
+	// Extract network
 	networkLen := binary.BigEndian.Uint16(data[offset:])
 	offset += 2
 	if offset+int(networkLen) > len(data) {
@@ -192,7 +194,7 @@ func UnpackConnectMessage(data []byte) (connID, network, address string, err err
 	network = string(data[offset : offset+int(networkLen)])
 	offset += int(networkLen)
 
-	// 提取 address
+	// Extract address
 	if offset+2 > len(data) {
 		return "", "", "", fmt.Errorf("missing address length")
 	}
@@ -206,10 +208,10 @@ func UnpackConnectMessage(data []byte) (connID, network, address string, err err
 	return connID, network, address, nil
 }
 
-// --- 连接响应消息 ---
-// 格式: [版本:1][类型:1][connID:20][success:1][error长度:2][error:N]
+// --- Connection response messages ---
+// Format: [version:1][type:1][connID:20][success:1][error_length:2][error:N]
 
-// PackConnectResponseMessage 打包连接响应
+// PackConnectResponseMessage packs connection response
 func PackConnectResponseMessage(connID string, success bool, errorMsg string) []byte {
 	if len(connID) > ConnIDSize {
 		connID = connID[:ConnIDSize]
@@ -217,17 +219,17 @@ func PackConnectResponseMessage(connID string, success bool, errorMsg string) []
 
 	errorBytes := []byte(errorMsg)
 
-	// 计算总长度
+	// Calculate total length
 	totalLen := ConnIDSize + 1 + 2 + len(errorBytes)
 	payload := make([]byte, totalLen)
 
 	offset := 0
 
-	// connID (固定20字节)
+	// connID (fixed 20 bytes)
 	copy(payload[offset:offset+ConnIDSize], []byte(connID))
 	offset += ConnIDSize
 
-	// success (1字节)
+	// success (1 byte)
 	if success {
 		payload[offset] = 1
 	} else {
@@ -235,17 +237,17 @@ func PackConnectResponseMessage(connID string, success bool, errorMsg string) []
 	}
 	offset++
 
-	// error长度 (2字节)
+	// error length (2 bytes)
 	binary.BigEndian.PutUint16(payload[offset:], uint16(len(errorBytes))) //nolint:gosec // error msg is always short
 	offset += 2
 
-	// error内容
+	// error content
 	copy(payload[offset:], errorBytes)
 
 	return PackBinaryMessage(BinaryMsgTypeConnectResponse, payload)
 }
 
-// UnpackConnectResponseMessage 解包连接响应
+// UnpackConnectResponseMessage unpacks connection response
 func UnpackConnectResponseMessage(data []byte) (connID string, success bool, errorMsg string, err error) {
 	if len(data) < ConnIDSize+3 {
 		return "", false, "", fmt.Errorf("connect response too short: %d bytes", len(data))
@@ -253,7 +255,7 @@ func UnpackConnectResponseMessage(data []byte) (connID string, success bool, err
 
 	offset := 0
 
-	// 提取 connID
+	// Extract connID
 	connIDBytes := data[offset : offset+ConnIDSize]
 	for i, b := range connIDBytes {
 		if b == 0 {
@@ -266,11 +268,11 @@ func UnpackConnectResponseMessage(data []byte) (connID string, success bool, err
 	}
 	offset += ConnIDSize
 
-	// 提取 success
+	// Extract success
 	success = data[offset] == 1
 	offset++
 
-	// 提取 error
+	// Extract error
 	errorLen := binary.BigEndian.Uint16(data[offset:])
 	offset += 2
 	if errorLen > 0 {
@@ -283,10 +285,10 @@ func UnpackConnectResponseMessage(data []byte) (connID string, success bool, err
 	return connID, success, errorMsg, nil
 }
 
-// --- 关闭消息 ---
-// 格式: [版本:1][类型:1][connID:20]
+// --- Close messages ---
+// Format: [version:1][type:1][connID:20]
 
-// PackCloseMessage 打包关闭消息
+// PackCloseMessage packs close message
 func PackCloseMessage(connID string) []byte {
 	if len(connID) > ConnIDSize {
 		connID = connID[:ConnIDSize]
@@ -298,13 +300,13 @@ func PackCloseMessage(connID string) []byte {
 	return PackBinaryMessage(BinaryMsgTypeClose, payload)
 }
 
-// UnpackCloseMessage 解包关闭消息
+// UnpackCloseMessage unpacks close message
 func UnpackCloseMessage(data []byte) (connID string, err error) {
 	if len(data) < ConnIDSize {
 		return "", fmt.Errorf("close message too short: %d bytes", len(data))
 	}
 
-	// 提取 connID
+	// Extract connID
 	connIDBytes := data[:ConnIDSize]
 	for i, b := range connIDBytes {
 		if b == 0 {
@@ -319,11 +321,11 @@ func UnpackCloseMessage(data []byte) (connID string, err error) {
 	return connID, nil
 }
 
-// --- 端口转发请求 ---
-// 格式: [版本:1][类型:1][clientID长度:2][clientID:N][端口数量:2][端口配置1][端口配置2]...
-// 端口配置格式: [remotePort:2][localPort:2][localHost长度:2][localHost:N][protocol长度:1][protocol:N]
+// --- Port forwarding request ---
+// Format: [version:1][type:1][clientID_length:2][clientID:N][port_count:2][port_config1][port_config2]...
+// Port config format: [remotePort:2][localPort:2][localHost_length:2][localHost:N][protocol_length:1][protocol:N]
 
-// PortConfig 端口转发配置
+// PortConfig port forwarding configuration
 type PortConfig struct {
 	RemotePort int
 	LocalPort  int
@@ -331,12 +333,12 @@ type PortConfig struct {
 	Protocol   string
 }
 
-// PackPortForwardMessage 打包端口转发请求
+// PackPortForwardMessage packs port forwarding request
 func PackPortForwardMessage(clientID string, ports []PortConfig) []byte {
 	clientIDBytes := []byte(clientID)
 
-	// 计算总长度
-	totalLen := 2 + len(clientIDBytes) + 2 // clientID长度 + clientID + 端口数量
+	// Calculate total length
+	totalLen := 2 + len(clientIDBytes) + 2 // clientID length + clientID + port count
 	for _, port := range ports {
 		totalLen += 2 + 2 + 2 + len(port.LocalHost) + 1 + len(port.Protocol)
 	}
@@ -345,43 +347,43 @@ func PackPortForwardMessage(clientID string, ports []PortConfig) []byte {
 
 	offset := 0
 
-	// clientID长度 (2字节)
+	// clientID length (2 bytes)
 	binary.BigEndian.PutUint16(payload[offset:], uint16(len(clientIDBytes))) //nolint:gosec // clientID is always short
 	offset += 2
 
-	// clientID内容
+	// clientID content
 	copy(payload[offset:], clientIDBytes)
 	offset += len(clientIDBytes)
 
-	// 端口数量 (2字节)
+	// port count (2 bytes)
 	binary.BigEndian.PutUint16(payload[offset:], uint16(len(ports))) //nolint:gosec // port count is limited
 	offset += 2
 
-	// 端口配置列表
+	// port configuration list
 	for _, port := range ports {
-		// remotePort (2字节)
+		// remotePort (2 bytes)
 		binary.BigEndian.PutUint16(payload[offset:], uint16(port.RemotePort)) //nolint:gosec // port is always valid
 		offset += 2
 
-		// localPort (2字节)
+		// localPort (2 bytes)
 		binary.BigEndian.PutUint16(payload[offset:], uint16(port.LocalPort)) //nolint:gosec // port is always valid
 		offset += 2
 
-		// localHost长度 (2字节)
+		// localHost length (2 bytes)
 		localHostBytes := []byte(port.LocalHost)
 		binary.BigEndian.PutUint16(payload[offset:], uint16(len(localHostBytes))) //nolint:gosec // host is always short
 		offset += 2
 
-		// localHost内容
+		// localHost content
 		copy(payload[offset:], localHostBytes)
 		offset += len(localHostBytes)
 
-		// protocol长度 (1字节)
+		// protocol length (1 byte)
 		protocolBytes := []byte(port.Protocol)
 		payload[offset] = byte(len(protocolBytes)) //nolint:gosec // protocol is always short
 		offset++
 
-		// protocol内容
+		// protocol content
 		copy(payload[offset:], protocolBytes)
 		offset += len(protocolBytes)
 	}
@@ -389,7 +391,7 @@ func PackPortForwardMessage(clientID string, ports []PortConfig) []byte {
 	return PackBinaryMessage(BinaryMsgTypePortForward, payload)
 }
 
-// UnpackPortForwardMessage 解包端口转发请求
+// UnpackPortForwardMessage unpacks port forwarding request
 func UnpackPortForwardMessage(data []byte) (clientID string, ports []PortConfig, err error) {
 	if len(data) < 4 {
 		return "", nil, fmt.Errorf("port forward message too short: %d bytes", len(data))
@@ -397,7 +399,7 @@ func UnpackPortForwardMessage(data []byte) (clientID string, ports []PortConfig,
 
 	offset := 0
 
-	// 提取 clientID
+	// Extract clientID
 	clientIDLen := binary.BigEndian.Uint16(data[offset:])
 	offset += 2
 	if offset+int(clientIDLen) > len(data) {
@@ -406,14 +408,14 @@ func UnpackPortForwardMessage(data []byte) (clientID string, ports []PortConfig,
 	clientID = string(data[offset : offset+int(clientIDLen)])
 	offset += int(clientIDLen)
 
-	// 提取端口数量
+	// Extract port count
 	if offset+2 > len(data) {
 		return "", nil, fmt.Errorf("missing port count")
 	}
 	portCount := binary.BigEndian.Uint16(data[offset:])
 	offset += 2
 
-	// 提取端口配置列表
+	// Extract port configuration list
 	ports = make([]PortConfig, portCount)
 	for i := 0; i < int(portCount); i++ {
 		// remotePort
@@ -458,26 +460,26 @@ func UnpackPortForwardMessage(data []byte) (clientID string, ports []PortConfig,
 	return clientID, ports, nil
 }
 
-// --- 端口转发响应 ---
-// 格式: [版本:1][类型:1][success:1][error长度:2][error:N][转发数量:2][端口1:2][状态1:1]...
+// --- Port forwarding response ---
+// Format: [version:1][type:1][success:1][error_length:2][error:N][forward_count:2][port1:2][status1:1]...
 
-// PortForwardStatus 端口转发状态
+// PortForwardStatus port forwarding status
 type PortForwardStatus struct {
 	Port    int
 	Success bool
 }
 
-// PackPortForwardResponseMessage 打包端口转发响应
+// PackPortForwardResponseMessage packs port forwarding response
 func PackPortForwardResponseMessage(success bool, errorMsg string, statuses []PortForwardStatus) []byte {
 	errorBytes := []byte(errorMsg)
 
-	// 计算总长度
+	// Calculate total length
 	totalLen := 1 + 2 + len(errorBytes) + 2 + len(statuses)*3
 	payload := make([]byte, totalLen)
 
 	offset := 0
 
-	// success (1字节)
+	// success (1 byte)
 	if success {
 		payload[offset] = 1
 	} else {
@@ -485,19 +487,19 @@ func PackPortForwardResponseMessage(success bool, errorMsg string, statuses []Po
 	}
 	offset++
 
-	// error长度 (2字节)
+	// error length (2 bytes)
 	binary.BigEndian.PutUint16(payload[offset:], uint16(len(errorBytes))) //nolint:gosec // error msg is always short
 	offset += 2
 
-	// error内容
+	// error content
 	copy(payload[offset:], errorBytes)
 	offset += len(errorBytes)
 
-	// 转发数量 (2字节)
+	// forward count (2 bytes)
 	binary.BigEndian.PutUint16(payload[offset:], uint16(len(statuses))) //nolint:gosec // status count is limited
 	offset += 2
 
-	// 状态列表
+	// status list
 	for _, status := range statuses {
 		binary.BigEndian.PutUint16(payload[offset:], uint16(status.Port)) //nolint:gosec // port is always valid
 		offset += 2
@@ -512,7 +514,7 @@ func PackPortForwardResponseMessage(success bool, errorMsg string, statuses []Po
 	return PackBinaryMessage(BinaryMsgTypePortForwardResp, payload)
 }
 
-// UnpackPortForwardResponseMessage 解包端口转发响应
+// UnpackPortForwardResponseMessage unpacks port forwarding response
 func UnpackPortForwardResponseMessage(data []byte) (success bool, errorMsg string, statuses []PortForwardStatus, err error) {
 	if len(data) < 5 {
 		return false, "", nil, fmt.Errorf("port forward response too short: %d bytes", len(data))
@@ -520,11 +522,11 @@ func UnpackPortForwardResponseMessage(data []byte) (success bool, errorMsg strin
 
 	offset := 0
 
-	// 提取 success
+	// Extract success
 	success = data[offset] == 1
 	offset++
 
-	// 提取 error
+	// Extract error
 	errorLen := binary.BigEndian.Uint16(data[offset:])
 	offset += 2
 	if errorLen > 0 {
@@ -535,14 +537,14 @@ func UnpackPortForwardResponseMessage(data []byte) (success bool, errorMsg strin
 		offset += int(errorLen)
 	}
 
-	// 提取状态数量
+	// Extract status count
 	if offset+2 > len(data) {
 		return false, "", nil, fmt.Errorf("missing status count")
 	}
 	statusCount := binary.BigEndian.Uint16(data[offset:])
 	offset += 2
 
-	// 提取状态列表
+	// Extract status list
 	statuses = make([]PortForwardStatus, statusCount)
 	for i := 0; i < int(statusCount); i++ {
 		if offset+3 > len(data) {
@@ -557,57 +559,57 @@ func UnpackPortForwardResponseMessage(data []byte) (success bool, errorMsg strin
 	return success, errorMsg, statuses, nil
 }
 
-// --- 认证请求消息 ---
-// 格式: [版本:1][类型:1][clientID长度:2][clientID:N][groupID长度:2][groupID:N][username长度:2][username:N][password长度:2][password:N]
+// --- Authentication request messages ---
+// Format: [version:1][type:1][clientID_length:2][clientID:N][groupID_length:2][groupID:N][username_length:2][username:N][password_length:2][password:N]
 
-// PackAuthMessage 打包认证请求
+// PackAuthMessage packs authentication request
 func PackAuthMessage(clientID, groupID, username, password string) []byte {
 	clientIDBytes := []byte(clientID)
 	groupIDBytes := []byte(groupID)
 	usernameBytes := []byte(username)
 	passwordBytes := []byte(password)
 
-	// 计算总长度
+	// Calculate total length
 	totalLen := 2 + len(clientIDBytes) + 2 + len(groupIDBytes) + 2 + len(usernameBytes) + 2 + len(passwordBytes)
 	payload := make([]byte, totalLen)
 
 	offset := 0
 
-	// clientID长度 (2字节)
+	// clientID length (2 bytes)
 	binary.BigEndian.PutUint16(payload[offset:], uint16(len(clientIDBytes))) //nolint:gosec // clientID is always short
 	offset += 2
 
-	// clientID内容
+	// clientID content
 	copy(payload[offset:], clientIDBytes)
 	offset += len(clientIDBytes)
 
-	// groupID长度 (2字节)
+	// groupID length (2 bytes)
 	binary.BigEndian.PutUint16(payload[offset:], uint16(len(groupIDBytes))) //nolint:gosec // groupID is always short
 	offset += 2
 
-	// groupID内容
+	// groupID content
 	copy(payload[offset:], groupIDBytes)
 	offset += len(groupIDBytes)
 
-	// username长度 (2字节)
+	// username length (2 bytes)
 	binary.BigEndian.PutUint16(payload[offset:], uint16(len(usernameBytes))) //nolint:gosec // username is always short
 	offset += 2
 
-	// username内容
+	// username content
 	copy(payload[offset:], usernameBytes)
 	offset += len(usernameBytes)
 
-	// password长度 (2字节)
+	// password length (2 bytes)
 	binary.BigEndian.PutUint16(payload[offset:], uint16(len(passwordBytes))) //nolint:gosec // password is always short
 	offset += 2
 
-	// password内容
+	// password content
 	copy(payload[offset:], passwordBytes)
 
 	return PackBinaryMessage(BinaryMsgTypeAuth, payload)
 }
 
-// UnpackAuthMessage 解包认证请求
+// UnpackAuthMessage unpacks authentication request
 func UnpackAuthMessage(data []byte) (clientID, groupID, username, password string, err error) {
 	if len(data) < 8 {
 		return "", "", "", "", fmt.Errorf("auth message too short: %d bytes", len(data))
@@ -615,7 +617,7 @@ func UnpackAuthMessage(data []byte) (clientID, groupID, username, password strin
 
 	offset := 0
 
-	// 提取 clientID
+	// Extract clientID
 	clientIDLen := binary.BigEndian.Uint16(data[offset:])
 	offset += 2
 	if offset+int(clientIDLen) > len(data) {
@@ -624,7 +626,7 @@ func UnpackAuthMessage(data []byte) (clientID, groupID, username, password strin
 	clientID = string(data[offset : offset+int(clientIDLen)])
 	offset += int(clientIDLen)
 
-	// 提取 groupID
+	// Extract groupID
 	if offset+2 > len(data) {
 		return "", "", "", "", fmt.Errorf("missing groupID length")
 	}
@@ -636,7 +638,7 @@ func UnpackAuthMessage(data []byte) (clientID, groupID, username, password strin
 	groupID = string(data[offset : offset+int(groupIDLen)])
 	offset += int(groupIDLen)
 
-	// 提取 username
+	// Extract username
 	if offset+2 > len(data) {
 		return "", "", "", "", fmt.Errorf("missing username length")
 	}
@@ -648,7 +650,7 @@ func UnpackAuthMessage(data []byte) (clientID, groupID, username, password strin
 	username = string(data[offset : offset+int(usernameLen)])
 	offset += int(usernameLen)
 
-	// 提取 password
+	// Extract password
 	if offset+2 > len(data) {
 		return "", "", "", "", fmt.Errorf("missing password length")
 	}
@@ -662,39 +664,39 @@ func UnpackAuthMessage(data []byte) (clientID, groupID, username, password strin
 	return clientID, groupID, username, password, nil
 }
 
-// --- 认证响应消息 ---
-// 格式: [版本:1][类型:1][status长度:2][status:N][reason长度:2][reason:N]
+// --- Authentication response messages ---
+// Format: [version:1][type:1][status_length:2][status:N][reason_length:2][reason:N]
 
-// PackAuthResponseMessage 打包认证响应
+// PackAuthResponseMessage packs authentication response
 func PackAuthResponseMessage(status, reason string) []byte {
 	statusBytes := []byte(status)
 	reasonBytes := []byte(reason)
 
-	// 计算总长度
+	// Calculate total length
 	totalLen := 2 + len(statusBytes) + 2 + len(reasonBytes)
 	payload := make([]byte, totalLen)
 
 	offset := 0
 
-	// status长度 (2字节)
+	// status length (2 bytes)
 	binary.BigEndian.PutUint16(payload[offset:], uint16(len(statusBytes))) //nolint:gosec // status is always short
 	offset += 2
 
-	// status内容
+	// status content
 	copy(payload[offset:], statusBytes)
 	offset += len(statusBytes)
 
-	// reason长度 (2字节)
+	// reason length (2 bytes)
 	binary.BigEndian.PutUint16(payload[offset:], uint16(len(reasonBytes))) //nolint:gosec // reason is always short
 	offset += 2
 
-	// reason内容
+	// reason content
 	copy(payload[offset:], reasonBytes)
 
 	return PackBinaryMessage(BinaryMsgTypeAuthResponse, payload)
 }
 
-// UnpackAuthResponseMessage 解包认证响应
+// UnpackAuthResponseMessage unpacks authentication response
 func UnpackAuthResponseMessage(data []byte) (status, reason string, err error) {
 	if len(data) < 4 {
 		return "", "", fmt.Errorf("auth response too short: %d bytes", len(data))
@@ -702,7 +704,7 @@ func UnpackAuthResponseMessage(data []byte) (status, reason string, err error) {
 
 	offset := 0
 
-	// 提取 status
+	// Extract status
 	statusLen := binary.BigEndian.Uint16(data[offset:])
 	offset += 2
 	if offset+int(statusLen) > len(data) {
@@ -711,7 +713,7 @@ func UnpackAuthResponseMessage(data []byte) (status, reason string, err error) {
 	status = string(data[offset : offset+int(statusLen)])
 	offset += int(statusLen)
 
-	// 提取 reason
+	// Extract reason
 	if offset+2 > len(data) {
 		return "", "", fmt.Errorf("missing reason length")
 	}

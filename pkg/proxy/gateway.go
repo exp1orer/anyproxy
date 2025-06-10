@@ -394,11 +394,6 @@ func (g *Gateway) removeClient(clientID string) {
 	logger.Info("Client removed", "client", clientID, "group", groupID, "group_size", groupSize, "total_clients", totalClients)
 }
 
-// getRandomClient returns a random available client
-func (g *Gateway) getRandomClient() (*ClientConn, error) {
-	return g.getClientByGroup("")
-}
-
 // getClientByGroup returns a random available client from the specified group
 func (g *Gateway) getClientByGroup(groupID string) (*ClientConn, error) {
 	g.clientsMu.RLock()
@@ -916,7 +911,7 @@ func (c *ClientConn) handleDataMessage(msg map[string]interface{}) {
 		deadline = ctxDeadline
 	}
 	if err := proxyConn.LocalConn.SetWriteDeadline(deadline); err != nil {
-		logger.Debug("Failed to set write deadline", "client", c.ID, "conn_id", connID, "err", err)
+		logger.Warn("Failed to set write deadline", "client", c.ID, "conn_id", connID, "err", err)
 	}
 
 	n, err := proxyConn.LocalConn.Write(data)
@@ -1111,7 +1106,7 @@ func (c *ClientConn) handleConnection(proxyConn *Conn) {
 					"id":   connID,
 				})
 				if closeErr != nil {
-					logger.Debug("Error sending close message to client (connection likely already closed)", "client", c.ID, "conn_id", connID, "err", closeErr)
+					logger.Warn("Error sending close message to client (connection likely already closed)", "client", c.ID, "conn_id", connID, "err", closeErr)
 				} else {
 					logger.Debug("Sent close message to client", "client", c.ID, "conn_id", connID)
 				}
@@ -1154,7 +1149,7 @@ func (c *ClientConn) closeConnectionUnsafe(connID string) {
 	proxyConn.once.Do(func() {
 		logger.Debug("Closing local connection (unsafe)", "client", c.ID, "conn_id", proxyConn.ID)
 		if err := proxyConn.LocalConn.Close(); err != nil {
-			logger.Debug("Unsafe connection close completed with error", "client", c.ID, "conn_id", proxyConn.ID, "err", err)
+			logger.Warn("Unsafe connection close completed with error", "client", c.ID, "conn_id", proxyConn.ID, "err", err)
 		}
 	})
 }

@@ -1,6 +1,5 @@
-// Package proxy_protocols provides HTTP and SOCKS5 proxy implementations for AnyProxy v2.
-// Package name contains underscore to distinguish from main proxy package.
-package proxy_protocols // nolint:revive // Package name intentionally uses underscore to avoid conflict with main proxy package
+// Package protocols provides HTTP proxy implementation for anyproxy v2.
+package protocols
 
 import (
 	"bufio"
@@ -22,10 +21,10 @@ import (
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/utils"
 )
 
-// 修复：使用缓冲区池减少内存分配
+// Fix: Use buffer pool to reduce memory allocation
 var bufferPool = sync.Pool{
 	New: func() interface{} {
-		// 分配 32KB 缓冲区
+		// Allocate 32KB buffer
 		buf := make([]byte, 32*1024)
 		return &buf
 	},
@@ -191,7 +190,6 @@ func (p *HTTPProxy) authenticateAndExtractUser(r *http.Request) (string, string,
 	}
 
 	decoded, err := base64.StdEncoding.DecodeString(auth[len(prefix):])
-	logger.Debug("Decoded proxy authorization header", "remote_addr", r.RemoteAddr, "decoded", string(decoded), "err", err)
 	if err != nil {
 		logger.Warn("Failed to decode proxy authorization header", "remote_addr", r.RemoteAddr, "err", err)
 		return "", "", false
@@ -223,11 +221,11 @@ func (p *HTTPProxy) authenticateAndExtractUser(r *http.Request) (string, string,
 
 // handleConnect handles CONNECT requests for HTTPS tunneling (based on v1 logic)
 func (p *HTTPProxy) handleConnect(w http.ResponseWriter, r *http.Request, clientAddr string) {
-	// 在请求开始时就生成 connID，贯穿整个请求生命周期
+	// Generate connID at the beginning of the request, used throughout the request lifecycle
 	connID := utils.GenerateConnID()
 	logger.Info("HTTP CONNECT request started", "conn_id", connID, "target_host", r.Host, "client", clientAddr)
 
-	// 将 connID 添加到 context 中
+	// Add connID to context
 	ctx := commonctx.WithConnID(r.Context(), connID)
 
 	// Extract target host and port (same as v1)
@@ -261,7 +259,11 @@ func (p *HTTPProxy) handleConnect(w http.ResponseWriter, r *http.Request, client
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
-	defer clientConn.Close()
+	defer func() {
+		if err := clientConn.Close(); err != nil {
+			logger.Warn("Error closing client connection", "conn_id", connID, "err", err)
+		}
+	}()
 
 	logger.Debug("HTTP connection hijacked successfully", "conn_id", connID, "client", clientConn.RemoteAddr())
 
@@ -272,12 +274,18 @@ func (p *HTTPProxy) handleConnect(w http.ResponseWriter, r *http.Request, client
 	if err != nil {
 		logger.Error("Failed to connect to target host", "conn_id", connID, "target_host", host, "err", err)
 		// Send error response manually since we've hijacked the connection (same as v1)
-		clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n"))
+		if _, writeErr := clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n")); writeErr != nil {
+			logger.Warn("Failed to write error response to client", "conn_id", connID, "err", writeErr)
+		}
 		return
 	}
-	defer targetConn.Close()
+	defer func() {
+		if err := targetConn.Close(); err != nil {
+			logger.Warn("Error closing target connection", "conn_id", connID, "err", err)
+		}
+	}()
 
-	// 连接已经建立，不需要再从 ConnWrapper 获取 ID，因为我们已经有了
+	// Connection already established, no need to get ID from ConnWrapper again since we already have it
 
 	logger.Debug("Connected to target host successfully", "conn_id", connID, "target_host", host, "target_addr", targetConn.RemoteAddr())
 
@@ -309,15 +317,15 @@ func (p *HTTPProxy) handleConnect(w http.ResponseWriter, r *http.Request, client
 	logger.Info("CONNECT tunnel closed", "conn_id", connID, "target_host", host)
 }
 
-// transfer copies data between two connections (�� migrated from v1)
+// transfer copies data between two connections (🆕 migrated from v1)
 func (p *HTTPProxy) transfer(dst, src net.Conn, direction string, connID string) {
 	logger.Debug("Starting data transfer", "conn_id", connID, "direction", direction, "src_addr", src.RemoteAddr(), "dst_addr", dst.RemoteAddr())
 
-	// 修复：从缓冲区池获取缓冲区
+	// Fix: Get buffer from buffer pool
 	bufPtr := bufferPool.Get().(*[]byte)
 	buffer := *bufPtr
 	defer func() {
-		// 将缓冲区返回到池中
+		// Return buffer to pool
 		bufferPool.Put(bufPtr)
 	}()
 
@@ -325,7 +333,9 @@ func (p *HTTPProxy) transfer(dst, src net.Conn, direction string, connID string)
 
 	for {
 		// Set read timeout to detect connection issues
-		src.SetReadDeadline(time.Now().Add(60 * time.Second))
+		if err := src.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+			logger.Warn("Failed to set read deadline", "conn_id", connID, "direction", direction, "err", err)
+		}
 
 		n, err := src.Read(buffer)
 
@@ -333,7 +343,9 @@ func (p *HTTPProxy) transfer(dst, src net.Conn, direction string, connID string)
 			totalBytes += int64(n)
 
 			// Set write timeout
-			dst.SetWriteDeadline(time.Now().Add(60 * time.Second))
+			if err := dst.SetWriteDeadline(time.Now().Add(60 * time.Second)); err != nil {
+				logger.Warn("Failed to set write deadline", "conn_id", connID, "direction", direction, "err", err)
+			}
 
 			_, writeErr := dst.Write(buffer[:n])
 			if writeErr != nil {
@@ -363,11 +375,11 @@ func (p *HTTPProxy) transfer(dst, src net.Conn, direction string, connID string)
 
 // handleRequest handles normal HTTP requests (based on v1 logic)
 func (p *HTTPProxy) handleRequest(w http.ResponseWriter, r *http.Request, clientAddr string) {
-	// 在请求开始时就生成 connID，贯穿整个请求生命周期
+	// Generate connID at the beginning of the request, used throughout the request lifecycle
 	connID := utils.GenerateConnID()
 	logger.Info("HTTP request started", "conn_id", connID, "method", r.Method, "url", r.URL.String(), "client", clientAddr)
 
-	// 将 connID 添加到 context 中
+	// Add connID to context
 	ctx := commonctx.WithConnID(r.Context(), connID)
 
 	// Parse target URL (same as v1)
@@ -408,9 +420,13 @@ func (p *HTTPProxy) handleRequest(w http.ResponseWriter, r *http.Request, client
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
-	defer targetConn.Close()
+	defer func() {
+		if err := targetConn.Close(); err != nil {
+			logger.Warn("Error closing target connection", "conn_id", connID, "err", err)
+		}
+	}()
 
-	// 连接已经建立，不需要再从 ConnWrapper 获取 ID，因为我们已经有了
+	// Connection already established, no need to get ID from ConnWrapper again since we already have it
 
 	logger.Debug("Connected to target server successfully", "conn_id", connID, "target_host", host)
 
@@ -449,7 +465,11 @@ func (p *HTTPProxy) handleRequest(w http.ResponseWriter, r *http.Request, client
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			logger.Warn("Error closing response body", "conn_id", connID, "err", err)
+		}
+	}()
 
 	logger.Debug("Response received from target server", "conn_id", connID, "status_code", response.StatusCode, "content_length", response.ContentLength)
 

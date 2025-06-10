@@ -337,7 +337,7 @@ func TestHTTPProxy_Authenticate(t *testing.T) {
 				req.Header.Set("Proxy-Authorization", tt.header)
 			}
 
-			result := httpProxy.authenticate(req)
+			_, _, result := httpProxy.authenticateAndExtractUser(req)
 			assert.Equal(t, tt.expected, result)
 		})
 	}

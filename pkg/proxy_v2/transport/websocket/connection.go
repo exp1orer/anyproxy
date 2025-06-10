@@ -9,26 +9,26 @@ import (
 )
 
 const (
-	writeBufSize = 1000 // 与 v1 相同的缓冲区大小
+	writeBufSize = 1000 // Same buffer size as v1
 )
 
-// webSocketConnectionWithInfo 带有客户端信息和高性能写入的 WebSocket 连接实现 (🆕 集成 v1 的性能优化)
+// webSocketConnectionWithInfo WebSocket connection implementation with client information and high-performance writing (🆕 integrates v1 performance optimizations)
 type webSocketConnectionWithInfo struct {
 	conn     *websocket.Conn
 	clientID string
 	groupID  string
-	writer   *Writer          // 🆕 集成高性能 writer
-	writeBuf chan interface{} // 🆕 异步写入队列
+	writer   *Writer          // 🆕 Integrated high-performance writer
+	writeBuf chan interface{} // 🆕 Async write queue
 }
 
 var _ transport.Connection = (*webSocketConnectionWithInfo)(nil)
 
-// NewWebSocketConnectionWithInfo 创建带有客户端信息和高性能写入的 WebSocket 连接包装器 (🆕 集成 v1 性能优化)
+// NewWebSocketConnectionWithInfo creates WebSocket connection wrapper with client information and high-performance writing (🆕 integrates v1 performance optimizations)
 func NewWebSocketConnectionWithInfo(conn *websocket.Conn, clientID, groupID string) transport.Connection {
-	// 🆕 创建写入缓冲区 (与 v1 相同)
+	// 🆕 Create write buffer (same as v1)
 	writeBuf := make(chan interface{}, writeBufSize)
 
-	// 🆕 创建高性能 writer，使用 clientID 作为标识符（传输层级别的追踪）
+	// 🆕 Create high-performance writer, using clientID as identifier (transport layer level tracking)
 	writer := NewWriterWithID(conn, writeBuf, clientID)
 	writer.Start()
 
@@ -36,8 +36,8 @@ func NewWebSocketConnectionWithInfo(conn *websocket.Conn, clientID, groupID stri
 		conn:     conn,
 		clientID: clientID,
 		groupID:  groupID,
-		writer:   writer,   // 🆕 高性能 writer
-		writeBuf: writeBuf, // 🆕 异步队列
+		writer:   writer,   // 🆕 High-performance writer
+		writeBuf: writeBuf, // 🆕 Async queue
 	}
 }
 
@@ -52,19 +52,19 @@ func (c *webSocketConnectionWithInfo) ReadMessage() ([]byte, error) {
 	return data, err
 }
 
-// Close 优雅关闭连接 (🆕 使用高性能 writer 的优雅停止)
+// Close gracefully closes connection (🆕 using high-performance writer's graceful stop)
 func (c *webSocketConnectionWithInfo) Close() error {
-	// 🆕 首先停止 writer，确保所有消息都被发送
+	// 🆕 First stop writer, ensure all messages are sent
 	if c.writer != nil {
 		c.writer.Stop()
 	}
 
-	// 🆕 关闭写入缓冲区
+	// 🆕 Close write buffer
 	if c.writeBuf != nil {
 		close(c.writeBuf)
 	}
 
-	// 然后关闭底层连接 (writer.Stop() 已经关闭了，但为了安全再次调用)
+	// Then close underlying connection (writer.Stop() already closed it, but call again for safety)
 	return c.conn.Close()
 }
 
@@ -76,12 +76,12 @@ func (c *webSocketConnectionWithInfo) LocalAddr() net.Addr {
 	return c.conn.LocalAddr()
 }
 
-// GetClientID 获取客户端ID
+// GetClientID gets client ID
 func (c *webSocketConnectionWithInfo) GetClientID() string {
 	return c.clientID
 }
 
-// GetGroupID 获取组ID
+// GetGroupID gets group ID
 func (c *webSocketConnectionWithInfo) GetGroupID() string {
 	return c.groupID
 }

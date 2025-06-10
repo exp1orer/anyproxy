@@ -10,7 +10,7 @@ import (
 
 var (
 	transportCreatorMap = map[string]Creator{}
-	transportMutex      sync.RWMutex // 修复：添加读写锁保护并发访问
+	transportMutex      sync.RWMutex // Fix: Add read-write lock to protect concurrent access
 )
 
 // Creator is a function that creates a Transport instance
@@ -18,7 +18,7 @@ type Creator func(authConfig *AuthConfig) Transport
 
 // RegisterTransportCreator registers a Creator for a given transport name
 func RegisterTransportCreator(name string, transportCreator Creator) {
-	// 修复：使用写锁保护注册操作
+	// Fix: Use write lock to protect registration operation
 	transportMutex.Lock()
 	defer transportMutex.Unlock()
 
@@ -28,13 +28,13 @@ func RegisterTransportCreator(name string, transportCreator Creator) {
 
 // CreateTransport creates a Transport instance for a given transport name
 func CreateTransport(name string, authConfig *AuthConfig) Transport {
-	// 修复：如果传入空字符串，使用默认传输类型
+	// Fix: If empty string is passed, use default transport type
 	if name == "" {
 		name = protocol.TransportTypeDefault
 		logger.Debug("Using default transport type", "transport_type", name)
 	}
 
-	// 修复：使用读锁保护读取操作
+	// Fix: Use read lock to protect read operation
 	transportMutex.RLock()
 	creator, ok := transportCreatorMap[name]
 	transportMutex.RUnlock()

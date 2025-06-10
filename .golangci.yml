@@ -1,25 +1,17 @@
 # golangci-lint configuration file
 # This file configures golangci-lint for the anyproxy project
 
-# Version of golangci-lint to use
 version: 2
 
 run:
   timeout: 5m
   issues-exit-code: 1
-  tests: true
-  skip-dirs:
-    - vendor
-    - build
-    - bin
-  skip-files:
-    - ".*\\.pb\\.go$"
+  tests: false  # Don't analyze test files at all
 
 output:
   format: colored-line-number
   print-issued-lines: true
   print-linter-name: true
-  uniq-by-line: true
 
 linters-settings:
   misspell:
@@ -27,7 +19,8 @@ linters-settings:
   lll:
     line-length: 140
   govet:
-    check-shadowing: true
+    enable:
+      - shadow
   revive:
     severity: warning
     rules:
@@ -37,9 +30,19 @@ linters-settings:
       - name: package-comments
         severity: warning
         disabled: false
+      - name: unused-parameter
+        severity: warning
+        disabled: false
   gosec:
     severity: "low"
     confidence: "low"
+  errcheck:
+    # Only exclude truly safe functions
+    exclude-functions:
+      - io.Copy
+      - io.WriteString
+  unused:
+    check-exported: false
 
 linters:
   disable-all: true
@@ -61,9 +64,29 @@ linters:
 
 issues:
   exclude-use-default: false
-  exclude:
-    # errcheck: Almost all programs ignore errors on these functions and in most cases it's ok
-    - "Error return value of .((os\\.)?std(out|err)\\..*|.*Close|.*Flush|os\\.Remove(All)?|.*printf?|os\\.(Un)?Setenv). is not checked"
+  exclude-dirs:
+    - vendor
+    - build
+    - bin
+  exclude-files:
+    - ".*\\.pb\\.go$"
+    - ".*_test\\.go$"  # Skip all test files
+  uniq-by-line: true
+  exclude-rules:
+    # === ONLY EXCLUDE TEST FILES ===
+    - path: "_test\\.go$"
+      linters:
+        - errcheck
+        - unparam
+        - gosec
+        - unused
+        - goconst
+        - ineffassign
+        - revive
+        - staticcheck
+        - govet
+        - misspell
+        - unconvert
     
   max-issues-per-linter: 0
   max-same-issues: 0

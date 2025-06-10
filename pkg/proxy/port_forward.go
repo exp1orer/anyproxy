@@ -192,9 +192,13 @@ func (pm *PortForwardManager) handlePortListener(portListener *PortListener) {
 
 		// Close the appropriate connection based on protocol
 		if portListener.Protocol == ProtocolTCP && portListener.Listener != nil {
-			portListener.Listener.Close()
+			if err := portListener.Listener.Close(); err != nil {
+				logger.Warn("Error closing TCP listener", "port", portListener.Port, "err", err)
+			}
 		} else if portListener.PacketConn != nil {
-			portListener.PacketConn.Close()
+			if err := portListener.PacketConn.Close(); err != nil {
+				logger.Warn("Error closing UDP packet connection", "port", portListener.Port, "err", err)
+			}
 		}
 
 		logger.Info("Port listener stopped", "port", portListener.Port, "client", portListener.ClientID)
@@ -234,7 +238,9 @@ func (pm *PortForwardManager) handleTCPPortListener(portListener *PortListener) 
 			select {
 			case connCh <- conn:
 			case <-portListener.ctx.Done():
-				conn.Close()
+				if err := conn.Close(); err != nil {
+					logger.Debug("Error closing connection during shutdown (expected)", "err", err)
+				}
 				return
 			}
 		}
@@ -353,7 +359,11 @@ func (pm *PortForwardManager) handleUDPPacket(portListener *PortListener, data [
 		logger.Error("Failed to create UDP connection", "port", portListener.Port, "client", portListener.ClientID, "target", targetAddr, "err", err)
 		return
 	}
-	defer targetConn.Close()
+	defer func() {
+		if err := targetConn.Close(); err != nil {
+			logger.Warn("Error closing target connection", "err", err)
+		}
+	}()
 
 	// Send data to target
 	_, err = targetConn.Write(data)
@@ -382,7 +392,11 @@ func (pm *PortForwardManager) handleUDPPacket(portListener *PortListener, data [
 
 // handleForwardedConnection handles a connection to a forwarded port
 func (pm *PortForwardManager) handleForwardedConnection(portListener *PortListener, incomingConn net.Conn) {
-	defer incomingConn.Close()
+	defer func() {
+		if err := incomingConn.Close(); err != nil {
+			logger.Warn("Error closing incoming connection", "err", err)
+		}
+	}()
 
 	// Create target address
 	targetAddr := net.JoinHostPort(portListener.LocalHost, strconv.Itoa(portListener.LocalPort))
@@ -395,7 +409,11 @@ func (pm *PortForwardManager) handleForwardedConnection(portListener *PortListen
 		logger.Error("Failed to connect", "port", portListener.Port, "client", portListener.ClientID, "target", targetAddr, "err", err)
 		return
 	}
-	defer clientConn.Close()
+	defer func() {
+		if err := clientConn.Close(); err != nil {
+			logger.Warn("Error closing client connection", "err", err)
+		}
+	}()
 
 	// Create context for the connection with timeout
 	ctx, cancel := context.WithTimeout(portListener.ctx, 30*time.Minute)
@@ -453,9 +471,13 @@ func (pm *PortForwardManager) copyDataWithContext(ctx context.Context, dst, src 
 
 		// Set read timeout based on context
 		if deadline, ok := ctx.Deadline(); ok {
-			src.SetReadDeadline(deadline)
+			if err := src.SetReadDeadline(deadline); err != nil {
+				logger.Warn("Failed to set read deadline", "err", err)
+			}
 		} else {
-			src.SetReadDeadline(time.Now().Add(30 * time.Second))
+			if err := src.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
+				logger.Warn("Failed to set read deadline", "err", err)
+			}
 		}
 
 		n, err := src.Read(buffer)
@@ -464,9 +486,13 @@ func (pm *PortForwardManager) copyDataWithContext(ctx context.Context, dst, src 
 
 			// Set write timeout based on context
 			if deadline, ok := ctx.Deadline(); ok {
-				dst.SetWriteDeadline(deadline)
+				if err := dst.SetWriteDeadline(deadline); err != nil {
+					logger.Warn("Failed to set write deadline", "err", err)
+				}
 			} else {
-				dst.SetWriteDeadline(time.Now().Add(30 * time.Second))
+				if err := dst.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil {
+					logger.Warn("Failed to set write deadline", "err", err)
+				}
 			}
 
 			_, writeErr := dst.Write(buffer[:n])

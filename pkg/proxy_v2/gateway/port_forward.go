@@ -16,7 +16,7 @@ import (
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/utils"
 )
 
-// PortForwardManager 端口转发管理器 (从 v1 完整迁移)
+// PortForwardManager port forwarding manager (complete migration from v1)
 type PortForwardManager struct {
 	// Map of client ID to their forwarded ports
 	clientPorts map[string]map[int]*PortListener
@@ -28,7 +28,7 @@ type PortForwardManager struct {
 	wg         sync.WaitGroup
 }
 
-// PortListener 端口监听器 (从 v1 完整迁移)
+// PortListener port listener (complete migration from v1)
 type PortListener struct {
 	Port       int
 	Protocol   string
@@ -59,7 +59,7 @@ func NewPortForwardManager() *PortForwardManager {
 	return manager
 }
 
-// OpenPorts 为客户端开启端口转发 (从 v1 完整迁移)
+// OpenPorts opens port forwarding for client (complete migration from v1)
 func (pm *PortForwardManager) OpenPorts(client *ClientConn, openPorts []config.OpenPort) error {
 	if client == nil {
 		logger.Error("Port opening failed: client cannot be nil")
@@ -152,7 +152,7 @@ func (pm *PortForwardManager) OpenPorts(client *ClientConn, openPorts []config.O
 	return nil
 }
 
-// createPortListener 创建端口监听器 (从 v1 完整迁移)
+// createPortListener creates port listener (complete migration from v1)
 func (pm *PortForwardManager) createPortListener(client *ClientConn, openPort config.OpenPort) (*PortListener, error) {
 	logger.Debug("Creating port listener", "client_id", client.ID, "port", openPort.RemotePort, "protocol", openPort.Protocol, "local_target", fmt.Sprintf("%s:%d", openPort.LocalHost, openPort.LocalPort))
 
@@ -210,7 +210,7 @@ func (pm *PortForwardManager) createPortListener(client *ClientConn, openPort co
 	return portListener, nil
 }
 
-// handlePortListener 处理端口监听器 (从 v1 完整迁移)
+// handlePortListener handles port listener (complete migration from v1)
 func (pm *PortForwardManager) handlePortListener(portListener *PortListener) {
 	defer func() {
 		// Cancel the port listener context
@@ -219,11 +219,11 @@ func (pm *PortForwardManager) handlePortListener(portListener *PortListener) {
 		// Close the appropriate connection based on protocol
 		if portListener.Protocol == protocol.ProtocolTCP && portListener.Listener != nil {
 			if err := portListener.Listener.Close(); err != nil {
-				logger.Debug("Error closing TCP listener", "port", portListener.Port, "err", err)
+				logger.Warn("Error closing TCP listener", "port", portListener.Port, "err", err)
 			}
 		} else if portListener.PacketConn != nil {
 			if err := portListener.PacketConn.Close(); err != nil {
-				logger.Debug("Error closing UDP packet connection", "port", portListener.Port, "err", err)
+				logger.Warn("Error closing UDP packet connection", "port", portListener.Port, "err", err)
 			}
 		}
 
@@ -239,7 +239,7 @@ func (pm *PortForwardManager) handlePortListener(portListener *PortListener) {
 	}
 }
 
-// handleTCPPortListener 处理 TCP 端口监听 (从 v1 完整迁移)
+// handleTCPPortListener handles TCP port listening (complete migration from v1)
 func (pm *PortForwardManager) handleTCPPortListener(portListener *PortListener) {
 	// Create channels for async operations
 	connCh := make(chan net.Conn, 1)
@@ -264,7 +264,7 @@ func (pm *PortForwardManager) handleTCPPortListener(portListener *PortListener) 
 			case connCh <- conn:
 			case <-portListener.ctx.Done():
 				if err := conn.Close(); err != nil {
-					logger.Debug("Error closing connection on context cancellation", "err", err)
+					logger.Warn("Error closing connection on context cancellation", "err", err)
 				}
 				return
 			}
@@ -300,7 +300,7 @@ func (pm *PortForwardManager) handleTCPPortListener(portListener *PortListener) 
 	}
 }
 
-// handleUDPPortListener 处理 UDP 端口监听 (从 v1 完整迁移)
+// handleUDPPortListener handles UDP port listening (complete migration from v1)
 func (pm *PortForwardManager) handleUDPPortListener(portListener *PortListener) {
 	buffer := make([]byte, 65536) // Maximum UDP packet size
 
@@ -368,9 +368,9 @@ func (pm *PortForwardManager) handleUDPPortListener(portListener *PortListener) 
 	}
 }
 
-// handleUDPPacket 处理单个 UDP 数据包 (从 v1 完整迁移)
+// handleUDPPacket handles single UDP packet (complete migration from v1)
 func (pm *PortForwardManager) handleUDPPacket(portListener *PortListener, data []byte, clientAddr net.Addr) {
-	// 生成连接 ID
+	// Generate connection ID
 	connID := utils.GenerateConnID()
 	ctx := commonctx.WithConnID(context.Background(), connID)
 
@@ -379,7 +379,7 @@ func (pm *PortForwardManager) handleUDPPacket(portListener *PortListener, data [
 
 	logger.Debug("New UDP packet to forwarded port", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "client_addr", clientAddr, "data_size", len(data))
 
-	// 连接到目标（使用客户端的拨号功能）
+	// Connect to target (using client's dial function)
 	targetConn, err := portListener.Client.dialNetwork(ctx, protocol.ProtocolUDP, targetAddr)
 	if err != nil {
 		logger.Error("Failed to create UDP connection to target through client tunnel", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "err", err)
@@ -387,7 +387,7 @@ func (pm *PortForwardManager) handleUDPPacket(portListener *PortListener, data [
 	}
 	defer func() {
 		if err := targetConn.Close(); err != nil {
-			logger.Debug("Error closing UDP target connection", "err", err)
+			logger.Warn("Error closing UDP target connection", "err", err)
 		}
 	}()
 
@@ -398,12 +398,14 @@ func (pm *PortForwardManager) handleUDPPacket(portListener *PortListener, data [
 		return
 	}
 
-	// 修复：异步处理 UDP 响应，避免不必要的等待
-	// 创建一个 goroutine 来等待响应，主函数立即返回
+	// Fix: Handle UDP response asynchronously to avoid unnecessary waiting
+	// Create a goroutine to wait for response, main function returns immediately
 	go func() {
-		// 使用更短的超时时间，并且是可配置的
+		// Use shorter timeout that is configurable
 		timeout := 1 * time.Second
-		targetConn.SetReadDeadline(time.Now().Add(timeout))
+		if err := targetConn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+			logger.Warn("Failed to set read deadline for UDP response", "err", err)
+		}
 
 		// Read response from target
 		responseBuffer := make([]byte, 65536)
@@ -413,7 +415,7 @@ func (pm *PortForwardManager) handleUDPPacket(portListener *PortListener, data [
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 				logger.Debug("UDP response timeout (expected for many UDP protocols)", "port", portListener.Port, "timeout", timeout)
 			} else {
-				logger.Debug("Error reading UDP response", "port", portListener.Port, "err", err)
+				logger.Warn("Error reading UDP response", "port", portListener.Port, "err", err)
 			}
 			return
 		}
@@ -431,15 +433,15 @@ func (pm *PortForwardManager) handleUDPPacket(portListener *PortListener, data [
 	logger.Debug("UDP request forwarded", "port", portListener.Port, "client_addr", clientAddr, "target", targetAddr, "request_size", len(data))
 }
 
-// handleForwardedConnection 处理转发的连接 (从 v1 完整迁移)
+// handleForwardedConnection handles forwarded connection (complete migration from v1)
 func (pm *PortForwardManager) handleForwardedConnection(portListener *PortListener, incomingConn net.Conn) {
 	defer func() {
 		if err := incomingConn.Close(); err != nil {
-			logger.Debug("Error closing incoming connection", "err", err)
+			logger.Warn("Error closing incoming connection", "err", err)
 		}
 	}()
 
-	// 生成连接 ID
+	// Generate connection ID
 	connID := utils.GenerateConnID()
 	ctx := commonctx.WithConnID(context.Background(), connID)
 
@@ -448,7 +450,7 @@ func (pm *PortForwardManager) handleForwardedConnection(portListener *PortListen
 
 	logger.Info("New port forwarding connection", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr())
 
-	// 连接到目标（使用客户端的拨号功能）
+	// Connect to target (using client's dial function)
 	clientConn, err := portListener.Client.dialNetwork(ctx, protocol.ProtocolTCP, targetAddr)
 	if err != nil {
 		logger.Error("Port forwarding connection failed", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr(), "err", err)
@@ -458,7 +460,7 @@ func (pm *PortForwardManager) handleForwardedConnection(portListener *PortListen
 	logger.Info("Port forwarding connection established", "port", portListener.Port, "client_id", portListener.ClientID, "conn_id", connID, "target", targetAddr, "remote_addr", incomingConn.RemoteAddr())
 	defer func() {
 		if err := clientConn.Close(); err != nil {
-			logger.Debug("Error closing client connection", "err", err)
+			logger.Warn("Error closing client connection", "err", err)
 		}
 	}()
 
@@ -470,7 +472,7 @@ func (pm *PortForwardManager) handleForwardedConnection(portListener *PortListen
 	pm.transferData(ctx, incomingConn, clientConn, portListener.Port)
 }
 
-// transferData 处理双向数据传输 (从 v1 完整迁移)
+// transferData handles bidirectional data transfer (complete migration from v1)
 func (pm *PortForwardManager) transferData(ctx context.Context, conn1, conn2 net.Conn, port int) {
 	var wg sync.WaitGroup
 
@@ -497,13 +499,13 @@ func (pm *PortForwardManager) transferData(ctx context.Context, conn1, conn2 net
 
 	select {
 	case <-done:
-		logger.Debug("Port forwarding connection finished", "port", port)
+		logger.Debug("Data transfer completed for port forwarding", "port", port)
 	case <-ctx.Done():
-		logger.Debug("Port forwarding connection cancelled", "port", port)
+		logger.Debug("Data transfer cancelled due to context", "port", port)
 	}
 }
 
-// copyDataWithContext 在连接间复制数据 (从 v1 完整迁移)
+// copyDataWithContext copies data between connections (complete migration from v1)
 func (pm *PortForwardManager) copyDataWithContext(ctx context.Context, dst, src net.Conn, direction string, port int) {
 	buffer := make([]byte, 32*1024) // 32KB buffer to match other components
 	totalBytes := int64(0)
@@ -520,11 +522,11 @@ func (pm *PortForwardManager) copyDataWithContext(ctx context.Context, dst, src 
 		// Set read timeout based on context
 		if deadline, ok := ctx.Deadline(); ok {
 			if err := src.SetReadDeadline(deadline); err != nil {
-				logger.Debug("Failed to set read deadline", "err", err)
+				logger.Warn("Failed to set read deadline", "err", err)
 			}
 		} else {
 			if err := src.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
-				logger.Debug("Failed to set read deadline", "err", err)
+				logger.Warn("Failed to set read deadline", "err", err)
 			}
 		}
 
@@ -535,11 +537,11 @@ func (pm *PortForwardManager) copyDataWithContext(ctx context.Context, dst, src 
 			// Set write timeout based on context
 			if deadline, ok := ctx.Deadline(); ok {
 				if err := dst.SetWriteDeadline(deadline); err != nil {
-					logger.Debug("Failed to set write deadline", "err", err)
+					logger.Warn("Failed to set write deadline", "err", err)
 				}
 			} else {
 				if err := dst.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil {
-					logger.Debug("Failed to set write deadline", "err", err)
+					logger.Warn("Failed to set write deadline", "err", err)
 				}
 			}
 
@@ -559,7 +561,7 @@ func (pm *PortForwardManager) copyDataWithContext(ctx context.Context, dst, src 
 	}
 }
 
-// CloseClientPorts 关闭客户端的所有端口 (从 v1 完整迁移)
+// CloseClientPorts closes all ports for client (complete migration from v1)
 func (pm *PortForwardManager) CloseClientPorts(clientID string) {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
@@ -624,7 +626,7 @@ func (pm *PortForwardManager) Stop() {
 	logger.Info("Port forwarding manager stopped", "ports_closed", totalPorts, "clients_affected", totalClients)
 }
 
-// GetClientPorts 获取客户端的端口列表 (从 v1 完整迁移)
+// GetClientPorts gets client port list (complete migration from v1)
 func (pm *PortForwardManager) GetClientPorts(clientID string) []int {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()

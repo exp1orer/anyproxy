@@ -32,38 +32,38 @@ const (
 	TransportTypeDefault   = TransportTypeWebSocket
 )
 
-// 超时配置
+// Timeout configuration
 var (
-	// DefaultConnectTimeout 默认连接超时
+	// DefaultConnectTimeout default connection timeout
 	DefaultConnectTimeout = 30 * time.Second
 
-	// DefaultReadTimeout 默认读取超时
+	// DefaultReadTimeout default read timeout
 	DefaultReadTimeout = 30 * time.Second
 
-	// DefaultWriteTimeout 默认写入超时
+	// DefaultWriteTimeout default write timeout
 	DefaultWriteTimeout = 30 * time.Second
 
-	// DefaultShutdownTimeout 默认关闭超时
+	// DefaultShutdownTimeout default shutdown timeout
 	DefaultShutdownTimeout = 3 * time.Second
 
-	// DefaultMessageChannelSize 默认消息通道大小
+	// DefaultMessageChannelSize default message channel size
 	DefaultMessageChannelSize = 100
 
-	// DefaultBufferSize 默认缓冲区大小
+	// DefaultBufferSize default buffer size
 	DefaultBufferSize = 32 * 1024 // 32KB
 )
 
-// SetConnectTimeout 设置连接超时（用于测试或动态配置）
+// SetConnectTimeout sets connection timeout (for testing or dynamic configuration)
 func SetConnectTimeout(timeout time.Duration) {
 	DefaultConnectTimeout = timeout
 }
 
-// SetReadTimeout 设置读取超时
+// SetReadTimeout sets read timeout
 func SetReadTimeout(timeout time.Duration) {
 	DefaultReadTimeout = timeout
 }
 
-// SetWriteTimeout 设置写入超时
+// SetWriteTimeout sets write timeout
 func SetWriteTimeout(timeout time.Duration) {
 	DefaultWriteTimeout = timeout
 }

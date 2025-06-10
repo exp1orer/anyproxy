@@ -69,7 +69,7 @@ func (t *grpcTransport) dialGRPCWithConfig(addr string, config *transport.Client
 	stream, err := client.BiStream(streamCtx)
 	if err != nil {
 		if closeErr := conn.Close(); closeErr != nil {
-			logger.Debug("Error closing gRPC connection after stream failure", "err", closeErr)
+			logger.Warn("Error closing gRPC connection after stream failure", "err", closeErr)
 		}
 		logger.Error("Failed to create gRPC stream", "client_id", config.ClientID, "err", err)
 		return nil, fmt.Errorf("failed to create gRPC stream: %v", err)

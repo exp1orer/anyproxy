@@ -226,7 +226,7 @@ func (c *Client) closeAllConnections() {
 	closedCount := 0
 	for connID, conn := range c.conns {
 		if err := conn.Close(); err != nil {
-			logger.Debug("Error closing conn", "id", c.config.ClientID, "conn", connID, "err", err)
+			logger.Warn("Error closing connection", "id", c.config.ClientID, "conn", connID, "err", err)
 		} else {
 			closedCount++
 		}
@@ -651,7 +651,7 @@ func (c *Client) handleConnection(connID string) {
 			deadline = ctxDeadline
 		}
 		if err := conn.SetReadDeadline(deadline); err != nil {
-			logger.Debug("Failed to set read deadline", "id", c.config.ClientID, "conn_id", connID, "err", err)
+			logger.Warn("Failed to set read deadline", "id", c.config.ClientID, "conn_id", connID, "err", err)
 		}
 
 		n, err := conn.Read(buffer)
@@ -713,7 +713,7 @@ func (c *Client) handleConnection(connID string) {
 				"id":   connID,
 			})
 			if closeErr != nil {
-				logger.Debug("Error sending close message to gateway", "id", c.config.ClientID, "conn_id", connID, "err", closeErr)
+				logger.Warn("Error sending close message to gateway", "id", c.config.ClientID, "conn_id", connID, "err", closeErr)
 			} else {
 				logger.Debug("Sent close message to gateway", "id", c.config.ClientID, "conn_id", connID)
 			}
@@ -813,7 +813,7 @@ func (c *Client) handleDataMessage(msg map[string]interface{}) {
 		deadline = ctxDeadline
 	}
 	if err := conn.SetWriteDeadline(deadline); err != nil {
-		logger.Debug("Failed to set write deadline", "id", c.config.ClientID, "conn_id", connID, "err", err)
+		logger.Warn("Failed to set write deadline", "id", c.config.ClientID, "conn_id", connID, "err", err)
 	}
 
 	n, err := conn.Write(data)

@@ -210,12 +210,6 @@ func (h *httpProxy) authenticateAndExtractUser(r *http.Request) (string, string,
 	return username, password, authenticated
 }
 
-// authenticate checks proxy authentication (kept for backward compatibility)
-func (h *httpProxy) authenticate(r *http.Request) bool {
-	_, _, authenticated := h.authenticateAndExtractUser(r)
-	return authenticated
-}
-
 // handleConnect handles HTTPS CONNECT requests for tunneling
 func (h *httpProxy) handleConnect(w http.ResponseWriter, r *http.Request, _ *UserContext, requestID string) {
 	// Extract target host and port
@@ -233,7 +227,7 @@ func (h *httpProxy) handleConnect(w http.ResponseWriter, r *http.Request, _ *Use
 	}
 	defer func() {
 		if err := targetConn.Close(); err != nil {
-			logger.Debug("Failed to close target connection", "id", requestID, "err", err)
+			logger.Warn("Failed to close target connection", "id", requestID, "err", err)
 		}
 	}()
 
@@ -253,7 +247,7 @@ func (h *httpProxy) handleConnect(w http.ResponseWriter, r *http.Request, _ *Use
 	}
 	defer func() {
 		if err := clientConn.Close(); err != nil {
-			logger.Debug("Failed to close client connection", "id", requestID, "err", err)
+			logger.Warn("Failed to close client connection", "id", requestID, "err", err)
 		}
 	}()
 
@@ -262,7 +256,7 @@ func (h *httpProxy) handleConnect(w http.ResponseWriter, r *http.Request, _ *Use
 	if err != nil {
 		logger.Error("Failed to send 200 response", "id", requestID, "err", err)
 		if _, writeErr := clientConn.Write([]byte("HTTP/1.1 502 Bad Gateway\r\n\r\n")); writeErr != nil {
-			logger.Debug("Failed to write error response", "id", requestID, "err", writeErr)
+			logger.Warn("Failed to write error response", "id", requestID, "err", writeErr)
 		}
 		return
 	}
@@ -316,7 +310,7 @@ func (h *httpProxy) handleHTTPRequest(w http.ResponseWriter, r *http.Request, us
 	}
 	defer func() {
 		if err := targetConn.Close(); err != nil {
-			logger.Debug("Failed to close target connection", "id", requestID, "err", err)
+			logger.Warn("Failed to close target connection", "id", requestID, "err", err)
 		}
 	}()
 
@@ -351,7 +345,7 @@ func (h *httpProxy) handleHTTPRequest(w http.ResponseWriter, r *http.Request, us
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			logger.Debug("Failed to close response body", "id", requestID, "err", err)
+			logger.Warn("Failed to close response body", "id", requestID, "err", err)
 		}
 	}()
 
@@ -385,18 +379,18 @@ func (h *httpProxy) transfer(dst, src net.Conn, direction string, requestID stri
 	go func() {
 		defer func() {
 			if err := dst.Close(); err != nil {
-				logger.Debug("Failed to close dst connection", "id", requestID, "err", err)
+				logger.Warn("Failed to close dst connection", "id", requestID, "err", err)
 			}
 		}()
 		buf := make([]byte, 32*1024)
 		for {
 			if err := src.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
-				logger.Debug("Failed to set read deadline", "id", requestID, "err", err)
+				logger.Warn("Failed to set read deadline", "id", requestID, "err", err)
 			}
 			n, err := src.Read(buf)
 			if n > 0 {
 				if err := dst.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil {
-					logger.Debug("Failed to set write deadline", "id", requestID, "err", err)
+					logger.Warn("Failed to set write deadline", "id", requestID, "err", err)
 				}
 				if _, writeErr := dst.Write(buf[:n]); writeErr != nil {
 					break
@@ -411,7 +405,7 @@ func (h *httpProxy) transfer(dst, src net.Conn, direction string, requestID stri
 	for {
 		// Set read timeout
 		if err := src.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
-			logger.Debug("Failed to set read deadline", "id", requestID, "err", err)
+			logger.Warn("Failed to set read deadline", "id", requestID, "err", err)
 		}
 
 		n, err := src.Read(buffer)
@@ -421,7 +415,7 @@ func (h *httpProxy) transfer(dst, src net.Conn, direction string, requestID stri
 
 			// Set write timeout
 			if err := dst.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil {
-				logger.Debug("Failed to set write deadline", "id", requestID, "err", err)
+				logger.Warn("Failed to set write deadline", "id", requestID, "err", err)
 			}
 
 			_, writeErr := dst.Write(buffer[:n])
@@ -433,7 +427,7 @@ func (h *httpProxy) transfer(dst, src net.Conn, direction string, requestID stri
 
 		if err != nil {
 			if err != io.EOF {
-				logger.Debug("Transfer read error", "id", requestID, "dir", direction, "bytes", totalBytes, "err", err)
+				logger.Warn("Transfer read error", "id", requestID, "dir", direction, "bytes", totalBytes, "err", err)
 			}
 			return
 		}

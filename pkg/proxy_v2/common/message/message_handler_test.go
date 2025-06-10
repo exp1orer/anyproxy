@@ -23,6 +23,10 @@ func (m *mockMessageConnection) ReadMessage() ([]byte, error) {
 	return m.readData, m.readErr
 }
 
+func (m *mockMessageConnection) Close() error {
+	return nil
+}
+
 // TestClientMessageHandler_PortForward test the port forward functionality of the client message handler
 func TestClientMessageHandler_PortForward(t *testing.T) {
 	// create port forward response message

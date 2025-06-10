@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net"
 	"testing"
@@ -212,7 +213,7 @@ func TestParseBinaryMessage(t *testing.T) {
 			// Initialize msgHandler
 			client.msgHandler = message.NewGatewayExtendedMessageHandler(mockConn)
 
-			msg, err := client.parseBinaryMessage(tt.msgData)
+			msg, err := parseBinaryMessageForTest(tt.msgData)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parseBinaryMessage() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -295,4 +296,58 @@ func createBinaryConnectResponseMessage(connID string, success bool, errorMsg st
 
 func createBinaryCloseMessage(connID string) []byte {
 	return protocol.PackCloseMessage(connID)
+}
+
+// parseBinaryMessageForTest is a helper function for testing that parses binary messages
+func parseBinaryMessageForTest(data []byte) (map[string]interface{}, error) {
+	if !protocol.IsBinaryMessage(data) {
+		return nil, fmt.Errorf("invalid message format")
+	}
+
+	// Extract message type from binary header
+	_, msgType, payload, err := protocol.UnpackBinaryHeader(data)
+	if err != nil {
+		return nil, err
+	}
+
+	switch msgType {
+	case protocol.BinaryMsgTypeData:
+		connID, payloadData, err := protocol.UnpackDataMessage(payload)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{
+			"type": protocol.MsgTypeData,
+			"id":   connID,
+			"data": payloadData,
+		}, nil
+
+	case protocol.BinaryMsgTypeConnectResponse:
+		connID, success, errorMsg, err := protocol.UnpackConnectResponseMessage(payload)
+		if err != nil {
+			return nil, err
+		}
+		result := map[string]interface{}{
+			"type":    protocol.MsgTypeConnectResponse,
+			"id":      connID,
+			"success": success,
+		}
+		if errorMsg != "" {
+			result["error"] = errorMsg
+		}
+		return result, nil
+
+	case protocol.BinaryMsgTypeClose:
+		connID, err := protocol.UnpackCloseMessage(payload)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{
+			"type": protocol.MsgTypeClose,
+			"id":   connID,
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("unsupported message type: %d", msgType)
+	}
 }

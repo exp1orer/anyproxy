@@ -15,7 +15,7 @@ import (
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
-// 🆕 写入请求类型
+// 🆕 Write request type
 type writeRequest struct {
 	data    []byte
 	errChan chan error
@@ -27,8 +27,8 @@ type quicConnection struct {
 	conn     quic.Connection
 	clientID string
 	groupID  string
-	// 🆕 移除 mutex，改用异步写入
-	writeChan chan *writeRequest // 🆕 异步写入队列
+	// 🆕 Remove mutex, use async writes instead
+	writeChan chan *writeRequest // 🆕 Async write queue
 	closed    bool
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -49,7 +49,7 @@ func newQUICConnection(stream quic.Stream, conn quic.Connection, clientID, group
 		conn:      conn,
 		clientID:  clientID,
 		groupID:   groupID,
-		writeChan: make(chan *writeRequest, 1000), // 🆕 异步写入队列
+		writeChan: make(chan *writeRequest, 1000), // 🆕 Async write queue
 		ctx:       ctx,
 		cancel:    cancel,
 		readChan:  make(chan []byte, 100),
@@ -57,7 +57,7 @@ func newQUICConnection(stream quic.Stream, conn quic.Connection, clientID, group
 		isClient:  true, // Default to client
 	}
 
-	// 🆕 启动读写 goroutines
+	// 🆕 Start read/write goroutines
 	go c.receiveLoop()
 	go c.writeLoop()
 	return c
@@ -72,7 +72,7 @@ func newQUICServerConnection(stream quic.Stream, conn quic.Connection, clientID,
 		conn:      conn,
 		clientID:  clientID,
 		groupID:   groupID,
-		writeChan: make(chan *writeRequest, 1000), // 🆕 异步写入队列
+		writeChan: make(chan *writeRequest, 1000), // 🆕 Async write queue
 		ctx:       ctx,
 		cancel:    cancel,
 		readChan:  make(chan []byte, 100),
@@ -80,31 +80,31 @@ func newQUICServerConnection(stream quic.Stream, conn quic.Connection, clientID,
 		isClient:  false, // Server connection
 	}
 
-	// 🆕 启动读写 goroutines
+	// 🆕 Start read/write goroutines
 	go c.receiveLoop()
 	go c.writeLoop()
 	return c
 }
 
-// 🆕 异步写入 goroutine，避免锁竞争
+// 🆕 Async write goroutine, avoiding lock contention
 func (c *quicConnection) writeLoop() {
 	defer func() {
-		// 修复：确保清空所有待处理的请求，避免 goroutine 泄漏
-		// 先处理已经在队列中的请求
+		// Fix: Ensure all pending requests are cleared to avoid goroutine leaks
+		// Process requests already in the queue first
 		for {
 			select {
 			case req := <-c.writeChan:
 				if req.errChan != nil {
 					select {
 					case req.errChan <- fmt.Errorf("connection closed"):
-						// 成功发送错误
+						// Successfully sent error
 					default:
-						// 如果没有人在等待，直接跳过
+						// If no one is waiting, skip directly
 					}
 					close(req.errChan)
 				}
 			default:
-				// 队列已空，退出
+				// Queue is empty, exit
 				return
 			}
 		}
@@ -116,7 +116,7 @@ func (c *quicConnection) writeLoop() {
 			return
 		case req, ok := <-c.writeChan:
 			if !ok {
-				// writeChan 已关闭
+				// writeChan is closed
 				return
 			}
 
@@ -146,7 +146,7 @@ func (c *quicConnection) WriteMessage(data []byte) error {
 	return c.writeDataAsync(data)
 }
 
-// 🆕 异步写入方法，无锁设计
+// 🆕 Async write method, lock-free design
 func (c *quicConnection) writeDataAsync(data []byte) error {
 	if c.closed {
 		return fmt.Errorf("connection closed")
@@ -160,30 +160,30 @@ func (c *quicConnection) writeDataAsync(data []byte) error {
 
 	select {
 	case c.writeChan <- req:
-		// 等待写入结果
+		// Wait for write result
 		select {
 		case err := <-errChan:
 			return err
 		case <-c.ctx.Done():
-			// 修复：使用带超时的 select 防止 goroutine 泄漏
+			// Fix: Use timed select to prevent goroutine leaks
 			go func() {
 				select {
 				case <-errChan:
-					// 成功消费错误
+					// Successfully consumed error
 				case <-time.After(5 * time.Second):
-					// 超时后退出，防止永久阻塞
+					// Exit after timeout to prevent permanent blocking
 					logger.Warn("Timeout waiting for write error channel", "client_id", c.clientID)
 				}
 			}()
 			return c.ctx.Err()
 		}
 	case <-c.ctx.Done():
-		// 修复：不需要关闭 errChan，因为没有 goroutine 在等待它
+		// Fix: No need to close errChan since no goroutine is waiting for it
 		return c.ctx.Err()
 	}
 }
 
-// 🆕 直接写入数据的方法，仅在 writeLoop 中使用
+// 🆕 Direct write data method, only used in writeLoop
 func (c *quicConnection) writeDataDirect(data []byte) error {
 	// Write length prefix (4 bytes)
 	// Check for potential overflow before conversion
@@ -207,7 +207,7 @@ func (c *quicConnection) writeDataDirect(data []byte) error {
 	return nil
 }
 
-// 🆕 保留 writeData 方法供认证时直接使用 (同步写入)
+// 🆕 Keep writeData method for direct use during authentication (synchronous write)
 func (c *quicConnection) writeData(data []byte) error {
 	return c.writeDataDirect(data)
 }
@@ -235,13 +235,13 @@ func (c *quicConnection) Close() error {
 			c.cancel()
 		}
 
-		// 🆕 关闭写入队列
+		// 🆕 Close write queue
 		close(c.writeChan)
 
 		// Close stream
 		if c.stream != nil {
 			if err := c.stream.Close(); err != nil {
-				logger.Debug("Error closing QUIC stream", "err", err)
+				logger.Warn("Error closing QUIC stream", "err", err)
 			}
 		}
 

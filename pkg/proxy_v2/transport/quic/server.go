@@ -3,6 +3,7 @@ package quic
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -12,6 +13,11 @@ import (
 	"github.com/buhuipao/anyproxy/pkg/logger"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
+)
+
+const (
+	authStatusSuccess = "success"
+	authStatusFailed  = "failed"
 )
 
 // quicTransport implements the Transport interface for QUIC
@@ -82,10 +88,10 @@ func (t *quicTransport) listenAndServe(addr string, handler func(transport.Conne
 
 	logger.Info("Starting QUIC server", "listen_addr", addr)
 
-	// 🚨 修复：配置QUIC心跳和空闲超时，防止连接意外断开
+	// 🚨 Fix: Configure QUIC heartbeat and idle timeout to prevent unexpected connection drops
 	quicConfig := &quic.Config{
-		KeepAlivePeriod: 30 * time.Second, // 每30秒发送PING心跳
-		MaxIdleTimeout:  5 * time.Minute,  // 5分钟空闲超时
+		KeepAlivePeriod: 30 * time.Second, // Send PING heartbeat every 30 seconds
+		MaxIdleTimeout:  5 * time.Minute,  // 5-minute idle timeout
 	}
 
 	// Create QUIC listener
@@ -127,32 +133,32 @@ func (t *quicTransport) handleConnection(conn quic.Connection) {
 	if err != nil {
 		logger.Error("Failed to accept QUIC stream", "err", err)
 		if err := conn.CloseWithError(0, "failed to accept stream"); err != nil {
-			logger.Debug("Error closing QUIC connection after stream accept failure", "err", err)
+			logger.Warn("Error closing QUIC connection after stream accept failure", "err", err)
 		}
 		return
 	}
 
 	logger.Debug("QUIC stream accepted")
 
-	// 🚨 修复：等待并验证认证消息
+	// 🚨 Fix: Wait for and validate authentication message
 	clientID, groupID, err := t.authenticateConnection(stream)
 	if err != nil {
 		logger.Warn("QUIC connection rejected during authentication", "remote_addr", conn.RemoteAddr(), "err", err)
 		if err := conn.CloseWithError(1, "authentication failed"); err != nil {
-			logger.Debug("Error closing QUIC connection after auth failure", "err", err)
+			logger.Warn("Error closing QUIC connection after auth failure", "err", err)
 		}
 		return
 	}
 
 	logger.Info("Client connected via QUIC", "client_id", clientID, "group_id", groupID, "remote_addr", conn.RemoteAddr())
 
-	// 创建服务端连接
+	// Create server connection
 	quicConn := newQUICServerConnection(stream, conn, clientID, groupID)
 
-	// 调用连接处理器，不使用recover掩盖问题
+	// Call connection handler, don't use recover to hide issues
 	defer func() {
 		if err := quicConn.Close(); err != nil {
-			logger.Debug("Error closing QUIC connection", "err", err)
+			logger.Warn("Error closing QUIC connection", "err", err)
 		}
 		logger.Info("Client disconnected from QUIC", "client_id", clientID, "group_id", groupID)
 	}()
@@ -160,9 +166,9 @@ func (t *quicTransport) handleConnection(conn quic.Connection) {
 	t.handler(quicConn)
 }
 
-// authenticateConnection 认证QUIC连接并提取客户端信息
+// authenticateConnection authenticates QUIC connection and extracts client information
 func (t *quicTransport) authenticateConnection(stream quic.Stream) (clientID, groupID string, err error) {
-	// 创建临时连接来读取认证消息
+	// Create temporary connection to read authentication message
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -175,13 +181,13 @@ func (t *quicTransport) authenticateConnection(stream quic.Stream) (clientID, gr
 		isClient:  false,
 	}
 
-	// 🆕 确保临时 channels 被关闭
+	// 🆕 Ensure temporary channels are closed
 	defer func() {
 		close(tempConn.readChan)
 		close(tempConn.errorChan)
 	}()
 
-	// 启动接收循环来读取第一条消息
+	// Start receive loop to read the first message
 	go func() {
 		data, readErr := tempConn.readData()
 		if readErr != nil {
@@ -197,37 +203,37 @@ func (t *quicTransport) authenticateConnection(stream quic.Stream) (clientID, gr
 		}
 	}()
 
-	// 设置认证超时
+	// Set authentication timeout
 	timeout := time.After(10 * time.Second)
 
 	var authData []byte
 	select {
 	case authData = <-tempConn.readChan:
-		// 成功接收到认证数据
+		// Successfully received authentication data
 	case err = <-tempConn.errorChan:
 		return "", "", fmt.Errorf("failed to read auth message: %v", err)
 	case <-timeout:
 		return "", "", fmt.Errorf("authentication timeout")
 	}
 
-	// 验证是否为二进制协议消息
+	// Verify if it's a binary protocol message
 	if !protocol.IsBinaryMessage(authData) {
 		return "", "", fmt.Errorf("received non-binary auth message")
 	}
 
-	// 解析二进制消息头
+	// Parse binary message header
 	version, msgType, data, err := protocol.UnpackBinaryHeader(authData)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to unpack auth message: %v", err)
 	}
 
-	_ = version // 暂时不使用版本号
+	_ = version // Version not used for now
 
 	if msgType != protocol.BinaryMsgTypeAuth {
 		return "", "", fmt.Errorf("expected auth message, got: 0x%02x", msgType)
 	}
 
-	// 解析认证消息
+	// Parse authentication message
 	clientID, groupID, username, password, err := protocol.UnpackAuthMessage(data)
 	if err != nil {
 		return "", "", fmt.Errorf("failed to parse auth message: %v", err)
@@ -237,28 +243,28 @@ func (t *quicTransport) authenticateConnection(stream quic.Stream) (clientID, gr
 		return "", "", fmt.Errorf("missing client_id")
 	}
 
-	// 验证认证信息
+	// Verify authentication information
 	var responseStatus, responseReason string
 	if t.authConfig != nil && t.authConfig.Username != "" {
 		if username != t.authConfig.Username || password != t.authConfig.Password {
-			responseStatus = "failed"
+			responseStatus = authStatusFailed
 			responseReason = "invalid credentials"
 		} else {
-			responseStatus = "success"
+			responseStatus = authStatusSuccess
 			logger.Debug("QUIC client authentication successful", "client_id", clientID)
 		}
 	} else {
-		responseStatus = "success"
+		responseStatus = authStatusSuccess
 	}
 
-	// 构建响应消息
+	// Build response message
 	authResponse := protocol.PackAuthResponseMessage(responseStatus, responseReason)
 	if writeErr := tempConn.writeData(authResponse); writeErr != nil {
 		return "", "", fmt.Errorf("failed to send auth response: %v", writeErr)
 	}
 
-	if responseStatus != "success" {
-		return "", "", fmt.Errorf(responseReason)
+	if responseStatus != authStatusSuccess {
+		return "", "", errors.New(responseReason)
 	}
 
 	logger.Debug("QUIC authentication completed successfully", "client_id", clientID, "group_id", groupID)
@@ -287,7 +293,7 @@ func (t *quicTransport) Close() error {
 	if t.listener != nil {
 		err := t.listener.Close()
 		if err != nil {
-			logger.Error("Error closing QUIC listener", "err", err)
+			logger.Warn("Error closing QUIC listener", "err", err)
 		} else {
 			logger.Debug("QUIC listener closed")
 		}
@@ -307,6 +313,6 @@ func generateSelfSignedCert() (tls.Certificate, error) {
 
 // Register the transport creator
 func init() {
-	// 修复：使用明确的常量进行注册
+	// Fix: Use explicit constant for registration
 	transport.RegisterTransportCreator(protocol.TransportTypeQUIC, NewQUICTransportWithAuth)
 }

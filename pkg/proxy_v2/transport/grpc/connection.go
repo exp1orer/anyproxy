@@ -16,7 +16,7 @@ import (
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
-// 🆕 写入消息类型
+// 🆕 Write message type
 type writeRequest struct {
 	msgType StreamMessage_MessageType
 	data    []byte
@@ -36,8 +36,8 @@ type grpcConnection struct {
 	conn     *grpc.ClientConn // Only client connections have this
 	clientID string
 	groupID  string
-	// 🆕 移除 mutex，改用异步写入
-	writeChan chan *writeRequest // 🆕 异步写入队列
+	// 🆕 Remove mutex, use async writes instead
+	writeChan chan *writeRequest // 🆕 Async write queue
 	closed    bool
 	ctx       context.Context
 	cancel    context.CancelFunc
@@ -57,14 +57,14 @@ func newGRPCConnection(stream TransportService_BiStreamClient, conn *grpc.Client
 		conn:      conn,
 		clientID:  clientID,
 		groupID:   groupID,
-		writeChan: make(chan *writeRequest, 1000), // 🆕 异步写入队列
+		writeChan: make(chan *writeRequest, 1000), // 🆕 Async write queue
 		ctx:       ctx,
 		cancel:    cancel,
 		readChan:  make(chan []byte, 100),
 		errorChan: make(chan error, 1),
 	}
 
-	// 🆕 启动读写 goroutines
+	// 🆕 Start read/write goroutines
 	go c.receiveLoop()
 	go c.writeLoop()
 	return c
@@ -79,23 +79,23 @@ func newGRPCServerConnection(stream TransportService_BiStreamServer, clientID, g
 		conn:      nil, // Server connections don't have client connections
 		clientID:  clientID,
 		groupID:   groupID,
-		writeChan: make(chan *writeRequest, 1000), // 🆕 异步写入队列
+		writeChan: make(chan *writeRequest, 1000), // 🆕 Async write queue
 		ctx:       ctx,
 		cancel:    cancel,
 		readChan:  make(chan []byte, 100),
 		errorChan: make(chan error, 1),
 	}
 
-	// 🆕 启动读写 goroutines
+	// 🆕 Start read/write goroutines
 	go c.receiveLoop()
 	go c.writeLoop()
 	return c
 }
 
-// 🆕 异步写入 goroutine，避免锁竞争
+// 🆕 Async write goroutine, avoiding lock contention
 func (c *grpcConnection) writeLoop() {
 	defer func() {
-		// 清空队列中的错误通道
+		// Clear error channels in the queue
 		for req := range c.writeChan {
 			if req.errChan != nil {
 				req.errChan <- fmt.Errorf("connection closed")
@@ -142,7 +142,7 @@ func (c *grpcConnection) WriteMessage(data []byte) error {
 	return c.writeMessageAsync(StreamMessage_DATA, data)
 }
 
-// 🆕 异步写入方法，无锁设计
+// 🆕 Async write method, lock-free design
 func (c *grpcConnection) writeMessageAsync(msgType StreamMessage_MessageType, data []byte) error {
 	if c.closed {
 		return fmt.Errorf("connection closed")
@@ -157,25 +157,25 @@ func (c *grpcConnection) writeMessageAsync(msgType StreamMessage_MessageType, da
 
 	select {
 	case c.writeChan <- req:
-		// 等待写入结果
+		// Wait for write result
 		select {
 		case err := <-errChan:
 			return err
 		case <-c.ctx.Done():
-			// 🆕 确保 errChan 不泄漏
+			// 🆕 Ensure errChan doesn't leak
 			go func() {
 				select {
 				case <-errChan:
-					// 成功消费错误
+					// Successfully consumed error
 				case <-time.After(5 * time.Second):
-					// 超时后退出，防止永久阻塞
+					// Exit after timeout to prevent permanent blocking
 					logger.Warn("Timeout waiting for write error channel", "client_id", c.clientID)
 				}
 			}()
 			return c.ctx.Err()
 		}
 	case <-c.ctx.Done():
-		// 🆕 确保 errChan 不泄漏
+		// 🆕 Ensure errChan doesn't leak
 		close(errChan)
 		return c.ctx.Err()
 	}
@@ -204,7 +204,7 @@ func (c *grpcConnection) Close() error {
 			c.cancel()
 		}
 
-		// 🆕 关闭写入队列
+		// 🆕 Close write queue
 		close(c.writeChan)
 
 		// Only client connections close the gRPC connection

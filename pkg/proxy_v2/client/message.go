@@ -13,7 +13,7 @@ import (
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/utils"
 )
 
-// handleMessages 处理来自网关的消息 (从 v1 迁移，适配传输层)
+// handleMessages handles messages from gateway (migrated from v1, adapted to transport layer)
 func (c *Client) handleMessages() {
 	logger.Debug("Starting message handler for gateway messages", "client_id", c.getClientID())
 	messageCount := 0
@@ -26,34 +26,34 @@ func (c *Client) handleMessages() {
 		default:
 		}
 
-		// 🆕 读取消息（使用二进制格式）
+		// 🆕 Read message (using binary format)
 		msg, err := c.readNextMessage()
 		if err != nil {
 			logger.Error("Transport read error", "client_id", c.getClientID(), "messages_processed", messageCount, "err", err)
-			// 连接失败，退出以触发重连
+			// Connection failed, exit to trigger reconnection
 			return
 		}
 
 		messageCount++
 
-		// 基于类型处理消息 (与 v1 相同)
+		// Handle message based on type (same as v1)
 		msgType, ok := msg["type"].(string)
 		if !ok {
 			logger.Error("Invalid message format from gateway", "client_id", c.getClientID(), "message_count", messageCount, "message_fields", utils.GetMessageFields(msg))
 			continue
 		}
 
-		// 记录消息处理（但不记录高频数据消息）(与 v1 相同)
+		// Log message processing (but not high-frequency data messages) (same as v1)
 		if msgType != protocol.MsgTypeData {
 			logger.Debug("Processing gateway message", "client_id", c.getClientID(), "message_type", msgType, "message_count", messageCount)
 		}
 
 		switch msgType {
 		case protocol.MsgTypeConnect, protocol.MsgTypeData, protocol.MsgTypeClose:
-			// 将所有消息路由到每个连接的通道 (与 v1 相同)
+			// Route all messages to each connection's channel (same as v1)
 			c.routeMessage(msg)
 		case protocol.MsgTypePortForwardResp:
-			// 直接处理端口转发响应 (与 v1 相同)
+			// Handle port forwarding response directly (same as v1)
 			logger.Debug("Received port forwarding response", "client_id", c.getClientID())
 			c.handlePortForwardResponse(msg)
 		default:
@@ -62,7 +62,7 @@ func (c *Client) handleMessages() {
 	}
 }
 
-// routeMessage 将消息路由到适当连接的消息通道 (与 v1 相同)
+// routeMessage routes messages to appropriate connection's message channel (same as v1)
 func (c *Client) routeMessage(msg map[string]interface{}) {
 	connID, ok := msg["id"].(string)
 	if !ok {
@@ -72,7 +72,7 @@ func (c *Client) routeMessage(msg map[string]interface{}) {
 
 	msgType, _ := msg["type"].(string)
 
-	// 对于连接消息，首先创建通道 (与 v1 相同)
+	// For connection messages, create channel first (same as v1)
 	if msgType == protocol.MsgTypeConnect {
 		logger.Debug("Creating message channel for new connection request", "client_id", c.getClientID(), "conn_id", connID)
 		c.createMessageChannel(connID)
@@ -80,15 +80,15 @@ func (c *Client) routeMessage(msg map[string]interface{}) {
 
 	msgChan, exists := c.connMgr.GetMessageChannel(connID)
 	if !exists {
-		// 连接不存在，忽略消息 (与 v1 相同)
+		// Connection doesn't exist, ignore message (same as v1)
 		logger.Debug("Ignoring message for non-existent connection", "client_id", c.getClientID(), "conn_id", connID, "message_type", msgType)
 		return
 	}
 
-	// 发送消息到连接的通道（非阻塞，带上下文感知）(与 v1 相同)
+	// Send message to connection's channel (non-blocking, with context awareness) (same as v1)
 	select {
 	case msgChan <- msg:
-		// 成功路由，不记录高频数据消息
+		// Successfully routed, don't log high-frequency data messages
 		if msgType != protocol.MsgTypeData {
 			logger.Debug("Message routed to connection handler", "client_id", c.getClientID(), "conn_id", connID, "message_type", msgType)
 		}
@@ -96,21 +96,21 @@ func (c *Client) routeMessage(msg map[string]interface{}) {
 		logger.Debug("Message routing cancelled due to context", "client_id", c.getClientID(), "conn_id", connID, "message_type", msgType)
 		return
 	default:
-		// 修复：当通道满时关闭连接，而不是静默丢弃消息
+		// Fix: Close connection when channel is full, rather than silently dropping messages
 		logger.Error("Message channel full for connection, closing connection to prevent protocol inconsistency", "client_id", c.getClientID(), "conn_id", connID, "message_type", msgType, "channel_size", len(msgChan), "channel_cap", cap(msgChan))
-		// 异步清理连接，避免死锁
+		// Clean up connection asynchronously to avoid deadlock
 		go c.cleanupConnection(connID)
 		return
 	}
 }
 
-// createMessageChannel 为连接创建消息通道 (与 v1 相同)
+// createMessageChannel creates message channel for connection (same as v1)
 func (c *Client) createMessageChannel(connID string) {
 	msgChan := c.connMgr.CreateMessageChannel(connID, protocol.DefaultMessageChannelSize)
 
 	logger.Debug("Created message channel for connection", "client_id", c.getClientID(), "conn_id", connID, "buffer_size", protocol.DefaultMessageChannelSize)
 
-	// 为此连接启动消息处理器 (与 v1 相同)
+	// Start message processor for this connection (same as v1)
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
@@ -118,7 +118,7 @@ func (c *Client) createMessageChannel(connID string) {
 	}()
 }
 
-// processConnectionMessages 按顺序处理特定连接的消息 (与 v1 相同)
+// processConnectionMessages processes messages for specific connection in order (same as v1)
 func (c *Client) processConnectionMessages(connID string, msgChan chan map[string]interface{}) {
 	logger.Debug("Starting connection message processor", "client_id", c.getClientID(), "conn_id", connID)
 
@@ -150,7 +150,7 @@ func (c *Client) processConnectionMessages(connID string, msgChan chan map[strin
 			case protocol.MsgTypeClose:
 				logger.Debug("Received close message, stopping connection processor", "client_id", c.getClientID(), "conn_id", connID, "messages_processed", messagesProcessed)
 				c.handleCloseMessage(msg)
-				return // 连接关闭，停止处理
+				return // Connection closed, stop processing
 			default:
 				logger.Warn("Unknown message type in connection processor", "client_id", c.getClientID(), "conn_id", connID, "message_type", msgType)
 			}
@@ -158,9 +158,9 @@ func (c *Client) processConnectionMessages(connID string, msgChan chan map[strin
 	}
 }
 
-// handleConnectMessage 处理来自网关的连接消息 (与 v1 相同)
+// handleConnectMessage handles connection messages from gateway (same as v1)
 func (c *Client) handleConnectMessage(msg map[string]interface{}) {
-	// 提取连接信息
+	// Extract connection information
 	connID, ok := msg["id"].(string)
 	if !ok {
 		logger.Error("Invalid connection ID in connect message", "client_id", c.getClientID(), "message_fields", utils.GetMessageFields(msg))
@@ -193,7 +193,7 @@ func (c *Client) handleConnectMessage(msg map[string]interface{}) {
 	}
 	logger.Debug("Connection allowed by host filtering rules", "client_id", c.getClientID(), "conn_id", connID, "address", address)
 
-	// 建立到目标的连接 (与 v1 相同)
+	// Establish connection to target (same as v1)
 	logger.Debug("Establishing connection to target", "client_id", c.getClientID(), "conn_id", connID, "network", network, "address", address)
 
 	var d net.Dialer
@@ -209,30 +209,30 @@ func (c *Client) handleConnectMessage(msg map[string]interface{}) {
 		if sendErr := c.sendConnectResponse(connID, false, err.Error()); sendErr != nil {
 			logger.Error("Failed to send connect response for connection error", "client_id", c.getClientID(), "conn_id", connID, "original_error", err, "send_error", sendErr)
 		}
-		// 更新失败指标
+		// Update failure metrics
 		monitoring.IncrementErrors()
 		return
 	}
 
 	logger.Info("Successfully connected to target", "client_id", c.getClientID(), "conn_id", connID, "network", network, "address", address, "connect_duration", connectDuration)
 
-	// 注册连接 (使用 ConnectionManager)
+	// Register connection (using ConnectionManager)
 	c.connMgr.AddConnection(connID, conn)
 	connectionCount := c.connMgr.GetConnectionCount()
 
-	// 更新指标
+	// Update metrics
 	monitoring.IncrementActiveConnections()
 
 	logger.Debug("Connection registered", "client_id", c.getClientID(), "conn_id", connID, "total_connections", connectionCount)
 
-	// 发送成功响应 (与 v1 相同)
+	// Send success response (same as v1)
 	if err := c.sendConnectResponse(connID, true, ""); err != nil {
 		logger.Error("Error sending connect_response to gateway", "client_id", c.getClientID(), "conn_id", connID, "err", err)
 		c.cleanupConnection(connID)
 		return
 	}
 
-	// 开始处理连接 (与 v1 相同)
+	// Start handling connection (same as v1)
 	logger.Debug("Starting connection handler", "client_id", c.getClientID(), "conn_id", connID)
 	c.wg.Add(1)
 	go func() {
@@ -241,7 +241,7 @@ func (c *Client) handleConnectMessage(msg map[string]interface{}) {
 	}()
 }
 
-// sendConnectResponse 发送连接响应到网关 (使用二进制格式)
+// sendConnectResponse sends connection response to gateway (using binary format)
 func (c *Client) sendConnectResponse(connID string, success bool, errorMsg string) error {
 	logger.Debug("Sending connect response to gateway", "client_id", c.getClientID(), "conn_id", connID, "success", success, "error_message", errorMsg)
 
@@ -255,9 +255,9 @@ func (c *Client) sendConnectResponse(connID string, success bool, errorMsg strin
 	return err
 }
 
-// handleDataMessage 处理来自网关的数据消息 (与 v1 相同)
+// handleDataMessage handles data messages from gateway (same as v1)
 func (c *Client) handleDataMessage(msg map[string]interface{}) {
-	// 提取消息信息
+	// Extract message information
 	connID, ok := msg["id"].(string)
 	if !ok {
 		logger.Error("Invalid connection ID in data message", "client_id", c.getClientID(), "message_fields", utils.GetMessageFields(msg))
@@ -266,11 +266,11 @@ func (c *Client) handleDataMessage(msg map[string]interface{}) {
 
 	var data []byte
 
-	// 首先尝试直接获取字节数据（二进制协议）
+	// First try to get byte data directly (binary protocol)
 	if rawData, ok := msg["data"].([]byte); ok {
 		data = rawData
 	} else if dataStr, ok := msg["data"].(string); ok {
-		// 兼容旧的 base64 格式
+		// Compatible with old base64 format
 		decoded, err := base64.StdEncoding.DecodeString(dataStr)
 		if err != nil {
 			logger.Error("Failed to decode base64 data", "client_id", c.getClientID(), "conn_id", connID, "data_length", len(dataStr), "err", err)
@@ -282,12 +282,12 @@ func (c *Client) handleDataMessage(msg map[string]interface{}) {
 		return
 	}
 
-	// 只记录较大的传输以减少噪音 (与 v1 相同)
+	// Only log larger transfers to reduce noise (same as v1)
 	if len(data) > 10000 {
 		logger.Debug("Client received large data chunk from gateway", "client_id", c.getClientID(), "conn_id", connID, "bytes", len(data))
 	}
 
-	// 获取连接 (使用 ConnectionManager)
+	// Get connection (using ConnectionManager)
 	conn, ok := c.connMgr.GetConnection(connID)
 	if !ok {
 		logger.Warn("Data message for unknown connection", "client_id", c.getClientID(), "conn_id", connID, "data_bytes", len(data))
@@ -300,7 +300,7 @@ func (c *Client) handleDataMessage(msg map[string]interface{}) {
 		deadline = ctxDeadline
 	}
 	if err := conn.SetWriteDeadline(deadline); err != nil {
-		logger.Debug("Failed to set write deadline", "client_id", c.getClientID(), "conn_id", connID, "err", err)
+		logger.Warn("Failed to set write deadline", "client_id", c.getClientID(), "conn_id", connID, "err", err)
 	}
 
 	n, err := conn.Write(data)
@@ -310,13 +310,13 @@ func (c *Client) handleDataMessage(msg map[string]interface{}) {
 		return
 	}
 
-	// 只记录较大的传输 (与 v1 相同)
+	// Only log larger transfers (same as v1)
 	if n > 10000 {
 		logger.Debug("Client successfully wrote large data chunk to target connection", "client_id", c.getClientID(), "conn_id", connID, "bytes", n)
 	}
 }
 
-// handleCloseMessage 处理来自网关的关闭消息 (与 v1 相同)
+// handleCloseMessage handles close messages from gateway (same as v1)
 func (c *Client) handleCloseMessage(msg map[string]interface{}) {
 	connID, ok := msg["id"].(string)
 	if !ok {

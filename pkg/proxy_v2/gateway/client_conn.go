@@ -22,12 +22,12 @@ import (
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
-// ClientConn 客户端连接 (基于 v1，但连接类型改为传输层抽象)
+// ClientConn client connection (based on v1, but connection type changed to transport layer abstraction)
 type ClientConn struct {
 	ID             string
 	GroupID        string
-	Conn           transport.Connection // 🆕 使用传输层连接
-	connMu         sync.RWMutex         // 修复：使用单个锁保护连接和消息通道
+	Conn           transport.Connection // 🆕 Use transport layer connection
+	connMu         sync.RWMutex         // Fix: Use single lock to protect connection and message channels
 	Conns          map[string]*Conn
 	msgChans       map[string]chan map[string]interface{}
 	ctx            context.Context
@@ -36,11 +36,11 @@ type ClientConn struct {
 	wg             sync.WaitGroup
 	portForwardMgr *PortForwardManager
 
-	// 🆕 公共消息处理器
+	// 🆕 Shared message handler
 	msgHandler message.ExtendedMessageHandler
 }
 
-// Conn 连接结构 (与 v1 相同)
+// Conn connection structure (same as v1)
 type Conn struct {
 	ID        string
 	LocalConn net.Conn
@@ -53,11 +53,11 @@ func (c *ClientConn) Stop() {
 	c.stopOnce.Do(func() {
 		logger.Info("Initiating graceful client stop", "client_id", c.ID)
 
-		// Step 1: 取消上下文 (与 v1 相同)
+		// Step 1: Cancel context (same as v1)
 		logger.Debug("Cancelling client context", "client_id", c.ID)
 		c.cancel()
 
-		// Step 2: 获取连接数量 (与 v1 相同)
+		// Step 2: Get connection count (same as v1)
 		c.connMu.RLock()
 		connectionCount := len(c.Conns)
 		c.connMu.RUnlock()
@@ -66,7 +66,7 @@ func (c *ClientConn) Stop() {
 			logger.Info("Waiting for active connections to finish", "client_id", c.ID, "connection_count", connectionCount)
 		}
 
-		// 等待连接完成当前操作 (与 v1 相同)
+		// Wait for connections to finish current operations (same as v1)
 		gracefulWait := func(duration time.Duration) {
 			select {
 			case <-c.ctx.Done():
@@ -77,16 +77,16 @@ func (c *ClientConn) Stop() {
 		}
 		gracefulWait(500 * time.Millisecond)
 
-		// Step 3: 🆕 关闭传输层连接
+		// Step 3: 🆕 Close transport layer connection
 		if c.Conn != nil {
 			logger.Debug("Closing transport connection", "client_id", c.ID)
 			if err := c.Conn.Close(); err != nil {
-				logger.Debug("Error closing transport connection", "client_id", c.ID, "err", err)
+				logger.Warn("Error closing transport connection", "client_id", c.ID, "err", err)
 			}
 			logger.Debug("Transport connection closed", "client_id", c.ID)
 		}
 
-		// Step 4: 关闭所有代理连接 (与 v1 相同)
+		// Step 4: Close all proxy connections (same as v1)
 		logger.Debug("Closing all proxy connections", "client_id", c.ID, "connection_count", connectionCount)
 		c.connMu.Lock()
 		for connID := range c.Conns {
@@ -97,8 +97,8 @@ func (c *ClientConn) Stop() {
 			logger.Debug("All proxy connections closed", "client_id", c.ID)
 		}
 
-		// Step 5: 关闭所有消息通道 (与 v1 相同)
-		// 修复：现在使用同一个锁，不需要再次加锁
+		// Step 5: Close all message channels (same as v1)
+		// Fix: Now using the same lock, no need to lock again
 		c.connMu.Lock()
 		channelCount := len(c.msgChans)
 		for connID, msgChan := range c.msgChans {
@@ -110,7 +110,7 @@ func (c *ClientConn) Stop() {
 			logger.Debug("Closed message channels", "client_id", c.ID, "channel_count", channelCount)
 		}
 
-		// Step 6: 等待所有goroutine完成 (与 v1 相同)
+		// Step 6: Wait for all goroutines to finish (same as v1)
 		logger.Debug("Waiting for client goroutines to finish", "client_id", c.ID)
 		done := make(chan struct{})
 		go func() {
@@ -130,28 +130,26 @@ func (c *ClientConn) Stop() {
 }
 
 func (c *ClientConn) dialNetwork(ctx context.Context, network, addr string) (net.Conn, error) {
-	// 优先使用 context 中的 connID，如果没有则生成新的
+	// Prefer connID from context, generate new one if not available
 	connID, ok := commonctx.GetConnID(ctx)
 	if !ok {
 		connID = utils.GenerateConnID()
 		logger.Debug("Generated new connection ID", "client_id", c.ID, "conn_id", connID)
-		// 将 connID 添加到 context 中，供后续组件使用
-		ctx = commonctx.WithConnID(ctx, connID) //nolint:staticcheck // ctx will be used in future versions
 	}
 
 	logger.Debug("Creating new network connection", "client_id", c.ID, "conn_id", connID, "network", network, "address", addr)
 
-	// 创建管道连接客户端和代理 (与 v1 相同)
+	// Create pipe to connect client and proxy (same as v1)
 	pipe1, pipe2 := net.Pipe()
 
-	// 创建代理连接 (与 v1 相同)
+	// Create proxy connection (same as v1)
 	proxyConn := &Conn{
 		ID:        connID,
 		Done:      make(chan struct{}),
 		LocalConn: pipe2,
 	}
 
-	// 注册连接 (与 v1 相同)
+	// Register connection (same as v1)
 	c.connMu.Lock()
 	c.Conns[connID] = proxyConn
 	connCount := len(c.Conns)
@@ -159,8 +157,8 @@ func (c *ClientConn) dialNetwork(ctx context.Context, network, addr string) (net
 
 	logger.Debug("Connection registered", "client_id", c.ID, "conn_id", connID, "total_connections", connCount)
 
-	// 🆕 发送连接请求到客户端 (适配传输层)
-	// 使用二进制格式发送连接消息
+	// 🆕 Send connection request to client (adapted to transport layer)
+	// Send connection message using binary format
 	err := c.writeConnectMessage(connID, network, addr)
 	if err != nil {
 		logger.Error("Failed to send connect message to client", "client_id", c.ID, "conn_id", connID, "err", err)
@@ -170,20 +168,20 @@ func (c *ClientConn) dialNetwork(ctx context.Context, network, addr string) (net
 
 	logger.Debug("Connect message sent to client", "client_id", c.ID, "conn_id", connID, "network", network, "address", addr)
 
-	// 启动连接处理 (与 v1 相同)
+	// Start connection handling (same as v1)
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
 		c.handleConnection(proxyConn)
 	}()
 
-	// 🚨 修复：返回包装后的连接，与 v1 保持一致 (重要的地址信息包装)
+	// 🚨 Fix: Return wrapped connection, consistent with v1 (important address information wrapping)
 	connWrapper := connection.NewConnWrapper(pipe1, network, addr)
 	connWrapper.SetConnID(connID)
 	return connWrapper, nil
 }
 
-// handleMessage 处理来自客户端的消息 (从 v1 迁移，适配传输层)
+// handleMessage handles messages from client (migrated from v1, adapted to transport layer)
 func (c *ClientConn) handleMessage() {
 	logger.Debug("Starting message handler for client", "client_id", c.ID)
 	messageCount := 0
@@ -196,7 +194,7 @@ func (c *ClientConn) handleMessage() {
 		default:
 		}
 
-		// 🆕 读取消息（使用二进制格式）
+		// 🆕 Read message (using binary format)
 		msg, err := c.readNextMessage()
 		if err != nil {
 			logger.Error("Transport read error", "client_id", c.ID, "messages_processed", messageCount, "err", err)
@@ -205,24 +203,24 @@ func (c *ClientConn) handleMessage() {
 
 		messageCount++
 
-		// 处理消息类型 (与 v1 相同)
+		// Handle message type (same as v1)
 		msgType, ok := msg["type"].(string)
 		if !ok {
 			logger.Error("Invalid message format from client - missing or invalid type field", "client_id", c.ID, "message_count", messageCount, "message_fields", utils.GetMessageFields(msg))
 			continue
 		}
 
-		// 记录消息处理（但不记录高频数据消息）(与 v1 相同)
+		// Log message processing (but don't log high-frequency data messages) (same as v1)
 		if msgType != protocol.MsgTypeData {
 			logger.Debug("Processing message", "client_id", c.ID, "message_type", msgType, "message_count", messageCount)
 		}
 
 		switch msgType {
 		case protocol.MsgTypeConnectResponse, protocol.MsgTypeData, protocol.MsgTypeClose:
-			// 将所有消息路由到每个连接的通道 (与 v1 相同)
+			// Route all messages to per-connection channels (same as v1)
 			c.routeMessage(msg)
 		case protocol.MsgTypePortForwardReq:
-			// 直接处理端口转发请求 (与 v1 相同)
+			// Handle port forwarding request directly (same as v1)
 			logger.Info("Received port forwarding request", "client_id", c.ID)
 			c.handlePortForwardRequest(msg)
 		default:
@@ -231,9 +229,9 @@ func (c *ClientConn) handleMessage() {
 	}
 }
 
-// 以下方法从 v1 复制，保持逻辑不变
+// Following methods copied from v1, logic remains unchanged
 
-// routeMessage 将消息路由到适当连接的消息通道 (与 v1 相同)
+// routeMessage routes messages to the appropriate connection's message channel (same as v1)
 func (c *ClientConn) routeMessage(msg map[string]interface{}) {
 	connID, ok := msg["id"].(string)
 	if !ok {
@@ -243,7 +241,7 @@ func (c *ClientConn) routeMessage(msg map[string]interface{}) {
 
 	msgType, _ := msg["type"].(string)
 
-	// 对于 connect_response 消息，如果需要，首先创建通道 (与 v1 相同)
+	// For connect_response messages, create channel first if needed (same as v1)
 	if msgType == "connect_response" {
 		logger.Debug("Creating message channel for connect response", "client_id", c.ID, "conn_id", connID)
 		c.createMessageChannel(connID)
@@ -254,15 +252,15 @@ func (c *ClientConn) routeMessage(msg map[string]interface{}) {
 	c.connMu.RUnlock()
 
 	if !exists {
-		// 连接不存在，忽略消息 (与 v1 相同)
+		// Connection doesn't exist, ignore message (same as v1)
 		logger.Debug("Ignoring message for non-existent connection", "client_id", c.ID, "conn_id", connID, "message_type", msgType)
 		return
 	}
 
-	// 发送消息到连接的通道（非阻塞，带上下文感知）(与 v1 相同)
+	// Send message to connection's channel (non-blocking with context awareness) (same as v1)
 	select {
 	case msgChan <- msg:
-		// 成功路由，不记录高频数据消息 (与 v1 相同)
+		// Successfully routed, don't log high-frequency data messages (same as v1)
 		if msgType != protocol.MsgTypeData {
 			logger.Debug("Message routed successfully", "client_id", c.ID, "conn_id", connID, "message_type", msgType)
 		}
@@ -270,20 +268,20 @@ func (c *ClientConn) routeMessage(msg map[string]interface{}) {
 		logger.Debug("Message routing cancelled due to context", "client_id", c.ID, "conn_id", connID, "message_type", msgType)
 		return
 	default:
-		// 修复：当通道满时关闭连接，而不是静默丢弃消息
+		// Fix: Close connection when channel is full, instead of silently dropping messages
 		logger.Error("Message channel full for connection, closing connection to prevent protocol inconsistency", "client_id", c.ID, "conn_id", connID, "message_type", msgType, "channel_size", len(msgChan), "channel_cap", cap(msgChan))
-		// 异步清理连接，避免死锁
+		// Clean up connection asynchronously to avoid deadlock
 		go c.closeConnection(connID)
 		return
 	}
 }
 
-// createMessageChannel 为连接创建消息通道 (与 v1 相同)
+// createMessageChannel creates a message channel for connection (same as v1)
 func (c *ClientConn) createMessageChannel(connID string) {
 	c.connMu.Lock()
 	defer c.connMu.Unlock()
 
-	// 检查通道是否已经存在 (与 v1 相同)
+	// Check if channel already exists (same as v1)
 	if _, exists := c.msgChans[connID]; exists {
 		return
 	}
@@ -291,7 +289,7 @@ func (c *ClientConn) createMessageChannel(connID string) {
 	msgChan := make(chan map[string]interface{}, protocol.DefaultMessageChannelSize)
 	c.msgChans[connID] = msgChan
 
-	// 为此连接启动消息处理器 (与 v1 相同)
+	// Start message processor for this connection (same as v1)
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
@@ -299,7 +297,7 @@ func (c *ClientConn) createMessageChannel(connID string) {
 	}()
 }
 
-// processConnectionMessages 按顺序处理特定连接的消息 (与 v1 相同)
+// processConnectionMessages processes messages for a specific connection in order (same as v1)
 func (c *ClientConn) processConnectionMessages(_ string, msgChan chan map[string]interface{}) {
 	for {
 		select {
@@ -318,15 +316,15 @@ func (c *ClientConn) processConnectionMessages(_ string, msgChan chan map[string
 				c.handleDataMessage(msg)
 			case protocol.MsgTypeClose:
 				c.handleCloseMessage(msg)
-				return // 连接关闭，停止处理
+				return // Connection closed, stop processing
 			}
 		}
 	}
 }
 
-// handleDataMessage 处理来自客户端的数据消息 (与 v1 相同)
+// handleDataMessage handles data messages from client (same as v1)
 func (c *ClientConn) handleDataMessage(msg map[string]interface{}) {
-	// 提取连接ID和数据 (与 v1 相同)
+	// Extract connection ID and data (same as v1)
 	connID, ok := msg["id"].(string)
 	if !ok {
 		logger.Error("Invalid connection ID in data message", "client_id", c.ID, "message_fields", utils.GetMessageFields(msg))
@@ -335,11 +333,11 @@ func (c *ClientConn) handleDataMessage(msg map[string]interface{}) {
 
 	var data []byte
 
-	// 首先尝试直接获取字节数据（二进制协议）
+	// First try to get byte data directly (binary protocol)
 	if rawData, ok := msg["data"].([]byte); ok {
 		data = rawData
 	} else if dataStr, ok := msg["data"].(string); ok {
-		// 兼容旧的 base64 格式
+		// Compatible with old base64 format
 		decoded, err := base64.StdEncoding.DecodeString(dataStr)
 		if err != nil {
 			logger.Error("Failed to decode base64 data", "client_id", c.ID, "conn_id", connID, "data_length", len(dataStr), "err", err)
@@ -351,12 +349,12 @@ func (c *ClientConn) handleDataMessage(msg map[string]interface{}) {
 		return
 	}
 
-	// 使用日志采样器减少噪音
+	// Use log sampler to reduce noise
 	if monitoring.ShouldLogData() && len(data) > 1000 {
 		logger.Debug("Gateway received data chunk", "client_id", c.ID, "conn_id", connID, "bytes", len(data))
 	}
 
-	// 安全获取连接 (与 v1 相同)
+	// Safely get connection (same as v1)
 	c.connMu.RLock()
 	proxyConn, ok := c.Conns[connID]
 	c.connMu.RUnlock()
@@ -365,13 +363,13 @@ func (c *ClientConn) handleDataMessage(msg map[string]interface{}) {
 		return
 	}
 
-	// 将数据写入本地连接，带上下文感知 (与 v1 相同)
+	// Write data to local connection with context awareness (same as v1)
 	deadline := time.Now().Add(protocol.DefaultWriteTimeout)
 	if ctxDeadline, ok := c.ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
 		deadline = ctxDeadline
 	}
 	if err := proxyConn.LocalConn.SetWriteDeadline(deadline); err != nil {
-		logger.Debug("Failed to set write deadline", "client_id", c.ID, "conn_id", connID, "err", err)
+		logger.Warn("Failed to set write deadline", "client_id", c.ID, "conn_id", connID, "err", err)
 	}
 
 	n, err := proxyConn.LocalConn.Write(data)
@@ -381,15 +379,15 @@ func (c *ClientConn) handleDataMessage(msg map[string]interface{}) {
 		return
 	}
 
-	// 只记录较大的传输 (与 v1 相同)
+	// Only log larger transfers (same as v1)
 	if n > 10000 {
 		logger.Debug("Gateway successfully wrote large data chunk to local connection", "client_id", c.ID, "conn_id", connID, "bytes", n)
 	}
 }
 
-// handleCloseMessage 处理来自客户端的关闭消息 (与 v1 相同)
+// handleCloseMessage handles close messages from client (same as v1)
 func (c *ClientConn) handleCloseMessage(msg map[string]interface{}) {
-	// 提取连接ID (与 v1 相同)
+	// Extract connection ID (same as v1)
 	connID, ok := msg["id"].(string)
 	if !ok {
 		logger.Error("Invalid connection ID in close message", "client_id", c.ID, "message_fields", utils.GetMessageFields(msg))
@@ -400,38 +398,38 @@ func (c *ClientConn) handleCloseMessage(msg map[string]interface{}) {
 	c.closeConnection(connID)
 }
 
-// closeConnection 关闭连接并清理资源 (与 v1 相同)
+// closeConnection closes connection and cleans up resources (same as v1)
 func (c *ClientConn) closeConnection(connID string) {
-	// 修复：使用单个锁原子地操作两个 map，避免竞态条件
+	// Fix: Use single lock to atomically operate on both maps, avoiding race conditions
 	c.connMu.Lock()
 	proxyConn, exists := c.Conns[connID]
 	if exists {
 		delete(c.Conns, connID)
 	}
 
-	// 同时清理消息通道
+	// Also clean up message channel
 	if msgChan, exists := c.msgChans[connID]; exists {
 		delete(c.msgChans, connID)
-		// 需要在锁外关闭通道，避免死锁
+		// Need to close channel outside the lock to avoid deadlock
 		defer close(msgChan)
 	}
 	c.connMu.Unlock()
 
-	// 只有在连接存在的情况下才进行清理 (与 v1 相同)
+	// Only clean up if connection exists (same as v1)
 	if !exists {
 		logger.Debug("Connection already removed", "conn_id", connID, "client_id", c.ID)
 		return
 	}
 
-	// 发信号停止连接（非阻塞，幂等）(与 v1 相同)
+	// Signal connection to stop (non-blocking, idempotent) (same as v1)
 	select {
 	case <-proxyConn.Done:
-		// 已经关闭，继续清理
+		// Already closed, continue cleanup
 	default:
 		close(proxyConn.Done)
 	}
 
-	// 关闭本地连接 (与 v1 相同)
+	// Close local connection (same as v1)
 	logger.Debug("Closing local connection", "conn_id", proxyConn.ID)
 	err := proxyConn.LocalConn.Close()
 	if err != nil {
@@ -441,7 +439,7 @@ func (c *ClientConn) closeConnection(connID string) {
 	logger.Debug("Connection closed and cleaned up", "conn_id", proxyConn.ID, "client_id", c.ID)
 }
 
-// closeConnectionUnsafe 不安全地关闭连接（调用者必须持有锁）(与 v1 相同)
+// closeConnectionUnsafe unsafely closes connection (caller must hold lock) (same as v1)
 func (c *ClientConn) closeConnectionUnsafe(connID string) {
 	proxyConn, exists := c.Conns[connID]
 	if !exists {
@@ -450,23 +448,23 @@ func (c *ClientConn) closeConnectionUnsafe(connID string) {
 
 	delete(c.Conns, connID)
 
-	// 发信号停止连接
+	// Signal connection to stop
 	select {
 	case <-proxyConn.Done:
-		// 已经关闭
+		// Already closed
 	default:
 		close(proxyConn.Done)
 	}
 
-	// 关闭实际连接
+	// Close actual connection
 	proxyConn.once.Do(func() {
 		if err := proxyConn.LocalConn.Close(); err != nil {
-			logger.Debug("Connection close error during unsafe close", "conn_id", proxyConn.ID, "err", err)
+			logger.Debug("Connection close error during unsafe close (expected)", "conn_id", proxyConn.ID, "err", err)
 		}
 	})
 }
 
-// handleConnectResponseMessage 处理来自客户端的连接响应消息 (与 v1 相同逻辑)
+// handleConnectResponseMessage handles connection response messages from client (same logic as v1)
 func (c *ClientConn) handleConnectResponseMessage(msg map[string]interface{}) {
 	connID, ok := msg["id"].(string)
 	if !ok {
@@ -485,7 +483,7 @@ func (c *ClientConn) handleConnectResponseMessage(msg map[string]interface{}) {
 	} else {
 		errorMsg, _ := msg["error"].(string)
 
-		// 根据错误类型使用不同的日志级别和格式
+		// Use different log levels and formats based on error type
 		if strings.Contains(strings.ToLower(errorMsg), "forbidden") || strings.Contains(strings.ToLower(errorMsg), "denied") {
 			logger.Error("Connection blocked by client security policy", "client_id", c.ID, "conn_id", connID, "error", errorMsg, "action", "Connection rejected by client due to security policy")
 		} else if strings.Contains(strings.ToLower(errorMsg), "timeout") {
@@ -498,11 +496,11 @@ func (c *ClientConn) handleConnectResponseMessage(msg map[string]interface{}) {
 	}
 }
 
-// handleConnection 处理代理连接的数据传输 (与 v1 相同)
+// handleConnection handles proxy connection data transfer (same as v1)
 func (c *ClientConn) handleConnection(proxyConn *Conn) {
 	logger.Debug("Starting connection handler", "client_id", c.ID, "conn_id", proxyConn.ID)
 
-	// 增加缓冲区大小以获得更好的性能 (与 v1 相同)
+	// Increase buffer size for better performance (same as v1)
 	buffer := make([]byte, protocol.DefaultBufferSize)
 	totalBytes := 0
 	readCount := 0
@@ -524,13 +522,13 @@ func (c *ClientConn) handleConnection(proxyConn *Conn) {
 		default:
 		}
 
-		// 基于上下文设置读取截止时间 (与 v1 相同)
+		// Set read deadline based on context (same as v1)
 		deadline := time.Now().Add(protocol.DefaultReadTimeout)
 		if ctxDeadline, ok := c.ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
 			deadline = ctxDeadline
 		}
 		if err := proxyConn.LocalConn.SetReadDeadline(deadline); err != nil {
-			logger.Debug("Failed to set read deadline", "client_id", c.ID, "conn_id", proxyConn.ID, "error", err)
+			logger.Warn("Failed to set read deadline", "client_id", c.ID, "conn_id", proxyConn.ID, "error", err)
 		}
 
 		n, err := proxyConn.LocalConn.Read(buffer)
@@ -538,12 +536,12 @@ func (c *ClientConn) handleConnection(proxyConn *Conn) {
 
 		if n > 0 {
 			totalBytes += n
-			// 只记录较大的传输以减少噪音 (与 v1 相同)
+			// Only log larger transfers to reduce noise (same as v1)
 			if totalBytes%100000 == 0 || n > 10000 {
 				logger.Debug("Gateway read data from local connection", "client_id", c.ID, "conn_id", proxyConn.ID, "bytes_this_read", n, "total_bytes", totalBytes, "read_count", readCount)
 			}
 
-			// 🆕 优化：使用二进制格式避免 base64 编码
+			// 🆕 Optimization: Use binary format to avoid base64 encoding
 			writeErr := c.writeDataMessage(proxyConn.ID, buffer[:n])
 			if writeErr != nil {
 				logger.Error("Error writing data to client via transport", "client_id", c.ID, "conn_id", proxyConn.ID, "data_bytes", n, "total_bytes", totalBytes, "error", writeErr)
@@ -551,7 +549,7 @@ func (c *ClientConn) handleConnection(proxyConn *Conn) {
 				return
 			}
 
-			// 只记录较大的传输 (与 v1 相同)
+			// Only log larger transfers (same as v1)
 			if n > 10000 {
 				logger.Debug("Gateway successfully sent large data chunk to client", "client_id", c.ID, "conn_id", proxyConn.ID, "bytes", n, "total_bytes", totalBytes)
 			}
@@ -559,7 +557,7 @@ func (c *ClientConn) handleConnection(proxyConn *Conn) {
 
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				// 检查超时是否由于上下文取消 (与 v1 相同)
+				// Check if timeout is due to context cancellation (same as v1)
 				select {
 				case <-c.ctx.Done():
 					logger.Debug("Connection handler stopping due to context during timeout", "client_id", c.ID, "conn_id", proxyConn.ID)
@@ -568,11 +566,11 @@ func (c *ClientConn) handleConnection(proxyConn *Conn) {
 					logger.Debug("Connection handler stopping - done channel during timeout", "client_id", c.ID, "conn_id", proxyConn.ID)
 					return
 				default:
-					continue // 如果上下文仍然有效，则继续超时
+					continue // Continue timeout if context is still valid
 				}
 			}
 
-			// 优雅地处理连接关闭错误 (与 v1 相同)
+			// Gracefully handle connection close errors (same as v1)
 			if strings.Contains(err.Error(), "use of closed network connection") ||
 				strings.Contains(err.Error(), "read/write on closed pipe") ||
 				strings.Contains(err.Error(), "connection reset by peer") {
@@ -583,10 +581,10 @@ func (c *ClientConn) handleConnection(proxyConn *Conn) {
 				logger.Debug("Local connection closed (EOF)", "client_id", c.ID, "conn_id", proxyConn.ID, "total_bytes", totalBytes, "read_count", readCount)
 			}
 
-			// 🆕 发送关闭消息到客户端
+			// 🆕 Send close message to client
 			closeErr := c.writeCloseMessage(proxyConn.ID)
 			if closeErr != nil {
-				logger.Debug("Error sending close message to client", "client_id", c.ID, "conn_id", proxyConn.ID, "error", closeErr)
+				logger.Warn("Error sending close message to client", "client_id", c.ID, "conn_id", proxyConn.ID, "error", closeErr)
 			} else {
 				logger.Debug("Sent close message to client", "client_id", c.ID, "conn_id", proxyConn.ID)
 			}
@@ -597,7 +595,7 @@ func (c *ClientConn) handleConnection(proxyConn *Conn) {
 	}
 }
 
-// handlePortForwardRequest 处理端口转发请求 (从 v1 完整迁移)
+// handlePortForwardRequest handles port forwarding requests (complete migration from v1)
 func (c *ClientConn) handlePortForwardRequest(msg map[string]interface{}) {
 	// Extract open ports from the message
 	openPortsInterface, ok := msg["open_ports"]
@@ -685,15 +683,15 @@ func (c *ClientConn) handlePortForwardRequest(msg map[string]interface{}) {
 	c.sendPortForwardResponse(true, "Ports opened successfully")
 }
 
-// sendPortForwardResponse 发送端口转发响应 (适配传输层)
+// sendPortForwardResponse sends port forwarding response (adapted to transport layer)
 func (c *ClientConn) sendPortForwardResponse(success bool, message string) {
-	// 使用二进制格式发送响应
+	// Send response using binary format
 	var errorMsg string
 	if !success {
 		errorMsg = message
 	}
 
-	// 创建状态列表（简化版本，只包含成功状态）
+	// Create status list (simplified version, only includes success status)
 	var statuses []protocol.PortForwardStatus
 
 	binaryMsg := protocol.PackPortForwardResponseMessage(success, errorMsg, statuses)

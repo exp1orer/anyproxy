@@ -310,7 +310,7 @@ func TestCloseAllConnections(t *testing.T) {
 
 	client := &Client{
 		config:  config,
-		connMgr: connection.NewConnectionManager(config.ClientID),
+		connMgr: connection.NewManager(config.ClientID),
 		ctx:     context.Background(),
 	}
 
@@ -331,7 +331,8 @@ func TestCloseAllConnections(t *testing.T) {
 	}
 
 	// Close all connections
-	client.closeAllConnections()
+	client.connMgr.CloseAllConnections()
+	client.connMgr.CloseAllMessageChannels()
 
 	// Verify all connections are closed
 	if client.connMgr.GetConnectionCount() != 0 {
@@ -447,7 +448,7 @@ func TestHandleConnection(t *testing.T) {
 
 			client := &Client{
 				config:           config,
-				connMgr:          connection.NewConnectionManager(config.ClientID),
+				connMgr:          connection.NewManager(config.ClientID),
 				ctx:              context.Background(),
 				forbiddenHostsRe: []*regexp.Regexp{},
 			}
@@ -517,7 +518,7 @@ func TestCleanupConnection(t *testing.T) {
 		config: &config.ClientConfig{
 			ClientID: "test-client",
 		},
-		connMgr: connection.NewConnectionManager("test-client"),
+		connMgr: connection.NewManager("test-client"),
 	}
 
 	// Test cleanup of existing connection
@@ -558,7 +559,7 @@ func TestConnectionConcurrency(t *testing.T) {
 		config: &config.ClientConfig{
 			ClientID: "test-client",
 		},
-		connMgr: connection.NewConnectionManager("test-client"),
+		connMgr: connection.NewManager("test-client"),
 		ctx:     context.Background(),
 	}
 

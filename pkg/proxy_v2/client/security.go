@@ -11,9 +11,9 @@ import (
 	"github.com/buhuipao/anyproxy/pkg/logger"
 )
 
-// compileHostPatterns 预编译所有主机正则表达式
+// compileHostPatterns pre-compiles all host regular expressions
 func (c *Client) compileHostPatterns() error {
-	// 编译禁止主机的正则表达式
+	// Compile forbidden hosts regular expressions
 	c.forbiddenHostsRe = make([]*regexp.Regexp, 0, len(c.config.ForbiddenHosts))
 	for _, pattern := range c.config.ForbiddenHosts {
 		re, err := regexp.Compile(pattern)
@@ -23,7 +23,7 @@ func (c *Client) compileHostPatterns() error {
 		c.forbiddenHostsRe = append(c.forbiddenHostsRe, re)
 	}
 
-	// 编译允许主机的正则表达式
+	// Compile allowed hosts regular expressions
 	c.allowedHostsRe = make([]*regexp.Regexp, 0, len(c.config.AllowedHosts))
 	for _, pattern := range c.config.AllowedHosts {
 		re, err := regexp.Compile(pattern)
@@ -36,9 +36,9 @@ func (c *Client) compileHostPatterns() error {
 	return nil
 }
 
-// isConnectionAllowed 检查连接是否被允许
+// isConnectionAllowed checks if connection is allowed
 func (c *Client) isConnectionAllowed(address string) bool {
-	// 首先检查是否被禁止
+	// First check if it's forbidden
 	for _, re := range c.forbiddenHostsRe {
 		if re.MatchString(address) {
 			logger.Warn("🚫 CONNECTION BLOCKED - Forbidden host", "client_id", c.getClientID(), "address", address, "pattern", re.String(), "action", "Connection rejected due to forbidden host policy")
@@ -46,13 +46,13 @@ func (c *Client) isConnectionAllowed(address string) bool {
 		}
 	}
 
-	// 如果没有配置允许的主机，则允许所有未被禁止的连接
+	// If no allowed hosts are configured, allow all non-forbidden connections
 	if len(c.allowedHostsRe) == 0 {
 		logger.Debug("Connection allowed - no allowed hosts configured", "client_id", c.getClientID(), "address", address)
 		return true
 	}
 
-	// 检查是否在允许列表中
+	// Check if it's in the allowed list
 	for _, re := range c.allowedHostsRe {
 		if re.MatchString(address) {
 			logger.Debug("Connection allowed - matches allowed pattern", "client_id", c.getClientID(), "address", address, "pattern", re.String())
@@ -64,13 +64,13 @@ func (c *Client) isConnectionAllowed(address string) bool {
 	return false
 }
 
-// createTLSConfig 创建 TLS 配置 (与 v1 相同)
+// createTLSConfig creates TLS configuration (same as v1)
 func (c *Client) createTLSConfig() (*tls.Config, error) {
 	tlsConfig := &tls.Config{
 		MinVersion: tls.VersionTLS12,
 	}
 
-	// 如果提供了 TLS 证书，加载它 (与 v1 相同)
+	// If TLS certificate is provided, load it (same as v1)
 	if c.config.GatewayTLSCert != "" {
 		certPEM, err := os.ReadFile(c.config.GatewayTLSCert)
 		if err != nil {
@@ -84,7 +84,7 @@ func (c *Client) createTLSConfig() (*tls.Config, error) {
 
 		tlsConfig.RootCAs = certPool
 
-		// 从证书文件路径中提取服务器名称 (与 v1 相同)
+		// Extract server name from certificate file path (same as v1)
 		serverName := strings.TrimSuffix(c.config.GatewayAddr, ":443")
 		if colonIndex := strings.LastIndex(serverName, ":"); colonIndex != -1 {
 			serverName = serverName[:colonIndex]

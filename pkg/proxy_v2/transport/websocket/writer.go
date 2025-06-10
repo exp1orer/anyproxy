@@ -164,19 +164,21 @@ func (w *Writer) run() {
 
 		case msg := <-w.ch:
 			if err := w.handleWrite(msg); err != nil {
-				logger.Debug("Write error", "err", err)
+				logger.Warn("Write error", "err", err)
 			}
 
 		case msg := <-w.backupCh:
 			if err := w.handleWrite(msg); err != nil {
-				logger.Debug("Write error from backup queue", "err", err)
+				logger.Warn("Write error from backup queue", "err", err)
 			}
 
 		case <-ticker.C:
 			// Send ping
-			w.conn.SetWriteDeadline(time.Now().Add(writeWait)) //nolint:errcheck
+			if err := w.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+				logger.Warn("Failed to set write deadline for ping", "connection_id", w.connectionID, "err", err)
+			}
 			if err := w.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				logger.Debug("Ping error", "err", err)
+				logger.Warn("Ping error", "err", err)
 				return
 			}
 		}
@@ -185,7 +187,9 @@ func (w *Writer) run() {
 
 // handleWrite writes a message and sends result to callback
 func (w *Writer) handleWrite(msg *writeMsg) error {
-	w.conn.SetWriteDeadline(time.Now().Add(writeWait)) //nolint:errcheck
+	if err := w.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+		logger.Error("Failed to set write deadline", "connection_id", w.connectionID, "err", err)
+	}
 
 	err := w.conn.WriteMessage(msg.msgType, msg.data)
 
@@ -216,7 +220,7 @@ func (w *Writer) handleShutdown() {
 		select {
 		case msg := <-w.ch:
 			if err := w.handleWrite(msg); err != nil {
-				logger.Debug("Error writing message during drain", "err", err)
+				logger.Warn("Error writing message during drain", "err", err)
 			} else {
 				drainedCount++
 			}
@@ -231,7 +235,7 @@ drainBackup:
 		select {
 		case msg := <-w.backupCh:
 			if err := w.handleWrite(msg); err != nil {
-				logger.Debug("Error writing message during drain", "err", err)
+				logger.Warn("Error writing message during drain", "err", err)
 			} else {
 				drainedCount++
 			}

@@ -167,7 +167,7 @@ func (t *grpcTransport) Close() error {
 	defer func() {
 		logger.Debug("Shutting down gRPC transport server")
 		if err := t.listener.Close(); err != nil {
-			logger.Debug("Error closing gRPC listener", "err", err)
+			logger.Warn("Error closing gRPC listener", "err", err)
 		}
 		logger.Debug("gRPC transport server shutdown completed")
 	}()
@@ -225,7 +225,7 @@ func (s *transportServer) BiStream(stream TransportService_BiStreamServer) error
 		defer func() {
 			// Only do necessary cleanup, don't hide panic
 			if err := conn.Close(); err != nil {
-				logger.Debug("Error closing connection", "err", err)
+				logger.Debug("Error closing connection (expected)", "err", err)
 			}
 		}()
 
@@ -257,6 +257,6 @@ func getMetadataValue(md metadata.MD, key string) string {
 
 // Register the transport creator
 func init() {
-	// 修复：使用明确的常量，避免空字符串注册
+	// Fix: Use explicit constant, avoid empty string registration
 	transport.RegisterTransportCreator(protocol.TransportTypeGRPC, NewGRPCTransportWithAuth)
 }

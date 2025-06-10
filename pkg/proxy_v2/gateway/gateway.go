@@ -14,7 +14,7 @@ import (
 	"github.com/buhuipao/anyproxy/pkg/logger"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/message"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/utils"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/proxy_protocols"
+	"github.com/buhuipao/anyproxy/pkg/proxy_v2/protocols"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 
 	// Import gRPC transport for side effects (registration)
@@ -23,30 +23,29 @@ import (
 	_ "github.com/buhuipao/anyproxy/pkg/proxy_v2/transport/websocket"
 )
 
-// Gateway represents the proxy gateway server (基于 v1 设计)
+// Gateway represents the proxy gateway server (based on v1 design)
 type Gateway struct {
 	config         *config.GatewayConfig
-	transport      transport.Transport  // 🆕 唯一的新增抽象
-	proxies        []utils.GatewayProxy // 保持 v1 接口
+	transport      transport.Transport  // 🆕 The only new abstraction
+	proxies        []utils.GatewayProxy // Keep v1 interface
 	clientsMu      sync.RWMutex
 	clients        map[string]*ClientConn
 	groups         map[string]map[string]struct{}
-	groupClients   map[string][]string // 修复：为轮询维护有序的客户端列表
-	groupCounters  map[string]int      // 修复：每个组的轮询计数器
+	groupClients   map[string][]string // Fix: Maintain ordered client list for round-robin
+	groupCounters  map[string]int      // Fix: Round-robin counter for each group
 	portForwardMgr *PortForwardManager
 	ctx            context.Context
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
-	stopOnce       sync.Once
 }
 
-// NewGateway creates a new proxy gateway (与 v1 相似)
+// NewGateway creates a new proxy gateway (similar to v1)
 func NewGateway(cfg *config.Config, transportType string) (*Gateway, error) {
 	logger.Info("Creating new gateway", "listen_addr", cfg.Gateway.ListenAddr, "http_proxy_enabled", cfg.Proxy.HTTP.ListenAddr != "", "socks5_proxy_enabled", cfg.Proxy.SOCKS5.ListenAddr != "", "transport_type", transportType, "auth_enabled", cfg.Gateway.AuthUsername != "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// 🆕 创建传输层 - 唯一的新增逻辑
+	// 🆕 Create transport layer - the only new logic
 	transportImpl := transport.CreateTransport(transportType, &transport.AuthConfig{
 		Username: cfg.Gateway.AuthUsername,
 		Password: cfg.Gateway.AuthPassword,
@@ -61,20 +60,20 @@ func NewGateway(cfg *config.Config, transportType string) (*Gateway, error) {
 		transport:      transportImpl,
 		clients:        make(map[string]*ClientConn),
 		groups:         make(map[string]map[string]struct{}),
-		groupClients:   make(map[string][]string), // 修复：初始化有序客户端列表
-		groupCounters:  make(map[string]int),      // 修复：初始化轮询计数器
+		groupClients:   make(map[string][]string), // Fix: Initialize ordered client list
+		groupCounters:  make(map[string]int),      // Fix: Initialize round-robin counter
 		portForwardMgr: NewPortForwardManager(),
 		ctx:            ctx,
 		cancel:         cancel,
 	}
 
-	// 初始化默认组 (与 v1 相同)
+	// Initialize default group (same as v1)
 	gateway.groups[""] = make(map[string]struct{})
 	logger.Debug("Initialized default group for gateway")
 
-	// 创建自定义拨号函数 (与 v1 相同)
+	// Create custom dial function (same as v1)
 	dialFn := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		// 从上下文提取用户信息 (与 v1 相同)
+		// Extract user information from context (same as v1)
 		var groupID string
 		if userCtx, ok := ctx.Value("user").(*utils.UserContext); ok {
 			logger.Debug("Dial function received user context", "group_id", userCtx.GroupID, "network", network, "address", addr)
@@ -83,7 +82,7 @@ func NewGateway(cfg *config.Config, transportType string) (*Gateway, error) {
 			logger.Debug("Dial function using default group", "network", network, "address", addr)
 		}
 
-		// 获取客户端 (与 v1 相同)
+		// Get client (same as v1)
 		client, err := gateway.getClientByGroup(groupID)
 		if err != nil {
 			logger.Error("Failed to get client by group for dial", "group_id", groupID, "network", network, "address", addr, "err", err)
@@ -93,13 +92,13 @@ func NewGateway(cfg *config.Config, transportType string) (*Gateway, error) {
 		return client.dialNetwork(ctx, network, addr)
 	}
 
-	// 初始化代理协议 (与 v1 相同)
+	// Initialize proxy protocols (same as v1)
 	var proxies []utils.GatewayProxy
 
-	// 创建 HTTP 代理 (与 v1 相同)
+	// Create HTTP proxy (same as v1)
 	if cfg.Proxy.HTTP.ListenAddr != "" {
 		logger.Info("Configuring HTTP proxy", "listen_addr", cfg.Proxy.HTTP.ListenAddr)
-		httpProxy, err := proxy_protocols.NewHTTPProxyWithAuth(&cfg.Proxy.HTTP, dialFn, gateway.extractGroupFromUsername)
+		httpProxy, err := protocols.NewHTTPProxyWithAuth(&cfg.Proxy.HTTP, dialFn, gateway.extractGroupFromUsername)
 		if err != nil {
 			cancel()
 			logger.Error("Failed to create HTTP proxy", "listen_addr", cfg.Proxy.HTTP.ListenAddr, "err", err)
@@ -109,10 +108,10 @@ func NewGateway(cfg *config.Config, transportType string) (*Gateway, error) {
 		logger.Info("HTTP proxy configured successfully", "listen_addr", cfg.Proxy.HTTP.ListenAddr)
 	}
 
-	// 创建 SOCKS5 代理 (与 v1 相同)
+	// Create SOCKS5 proxy (same as v1)
 	if cfg.Proxy.SOCKS5.ListenAddr != "" {
 		logger.Info("Configuring SOCKS5 proxy", "listen_addr", cfg.Proxy.SOCKS5.ListenAddr)
-		socks5Proxy, err := proxy_protocols.NewSOCKS5ProxyWithAuth(&cfg.Proxy.SOCKS5, dialFn, gateway.extractGroupFromUsername)
+		socks5Proxy, err := protocols.NewSOCKS5ProxyWithAuth(&cfg.Proxy.SOCKS5, dialFn, gateway.extractGroupFromUsername)
 		if err != nil {
 			cancel()
 			logger.Error("Failed to create SOCKS5 proxy", "listen_addr", cfg.Proxy.SOCKS5.ListenAddr, "err", err)
@@ -122,7 +121,7 @@ func NewGateway(cfg *config.Config, transportType string) (*Gateway, error) {
 		logger.Info("SOCKS5 proxy configured successfully", "listen_addr", cfg.Proxy.SOCKS5.ListenAddr)
 	}
 
-	// 确保至少配置一个代理 (与 v1 相同)
+	// Ensure at least one proxy is configured (same as v1)
 	if len(proxies) == 0 {
 		cancel()
 		logger.Error("No proxy configured - at least one proxy type must be enabled", "http_addr", cfg.Proxy.HTTP.ListenAddr, "socks5_addr", cfg.Proxy.SOCKS5.ListenAddr)
@@ -135,7 +134,7 @@ func NewGateway(cfg *config.Config, transportType string) (*Gateway, error) {
 	return gateway, nil
 }
 
-// extractGroupFromUsername 提取组ID (与 v1 相同)
+// extractGroupFromUsername extracts group ID (same as v1)
 func (g *Gateway) extractGroupFromUsername(username string) string {
 	logger.Debug("extractGroupFromUsername", "username", username)
 	parts := strings.Split(username, ".")
@@ -145,16 +144,16 @@ func (g *Gateway) extractGroupFromUsername(username string) string {
 	return ""
 }
 
-// Start starts the gateway (与 v1 相似，但使用传输层抽象)
+// Start starts the gateway (similar to v1, but uses transport layer abstraction)
 func (g *Gateway) Start() error {
 	logger.Info("Starting gateway server", "listen_addr", g.config.ListenAddr, "proxy_count", len(g.proxies))
 
-	// 🆕 检查并配置 TLS (从 v1 迁移)
+	// 🆕 Check and configure TLS (migrated from v1)
 	var tlsConfig *tls.Config
 	if g.config.TLSCert != "" && g.config.TLSKey != "" {
 		logger.Debug("Loading TLS certificates", "cert_file", g.config.TLSCert, "key_file", g.config.TLSKey)
 
-		// 加载 TLS 证书和密钥 (与 v1 相同)
+		// Load TLS certificate and key (same as v1)
 		cert, err := tls.LoadX509KeyPair(g.config.TLSCert, g.config.TLSKey)
 		if err != nil {
 			logger.Error("Failed to load TLS certificate", "cert_file", g.config.TLSCert, "key_file", g.config.TLSKey, "err", err)
@@ -162,7 +161,7 @@ func (g *Gateway) Start() error {
 		}
 		logger.Debug("TLS certificates loaded successfully")
 
-		// 配置 TLS (与 v1 相同)
+		// Configure TLS (same as v1)
 		tlsConfig = &tls.Config{
 			Certificates: []tls.Certificate{cert},
 			MinVersion:   tls.VersionTLS12,
@@ -170,7 +169,7 @@ func (g *Gateway) Start() error {
 		logger.Debug("TLS configuration created", "min_version", "TLS 1.2")
 	}
 
-	// 🆕 启动传输层服务器 - 支持 TLS (从 v1 迁移)
+	// 🆕 Start transport layer server - support TLS (migrated from v1)
 	logger.Info("Starting transport server for client connections")
 	if tlsConfig != nil {
 		logger.Info("Starting secure transport server (HTTPS/WSS)")
@@ -188,13 +187,13 @@ func (g *Gateway) Start() error {
 		logger.Info("Transport server started successfully", "listen_addr", g.config.ListenAddr)
 	}
 
-	// 启动所有代理服务器 (与 v1 相同)
+	// Start all proxy servers (same as v1)
 	logger.Info("Starting proxy servers", "count", len(g.proxies))
 	for i, proxy := range g.proxies {
 		logger.Debug("Starting proxy server", "index", i, "type", fmt.Sprintf("%T", proxy))
 		if err := proxy.Start(); err != nil {
 			logger.Error("Failed to start proxy server", "index", i, "type", fmt.Sprintf("%T", proxy), "err", err)
-			// 停止已启动的代理
+			// Stop already started proxies
 			logger.Warn("Stopping previously started proxies due to failure", "stopping_count", i)
 			for j := 0; j < i; j++ {
 				if stopErr := g.proxies[j].Stop(); stopErr != nil {
@@ -211,15 +210,15 @@ func (g *Gateway) Start() error {
 	return nil
 }
 
-// Stop stops the gateway gracefully (与 v1 相同)
+// Stop stops the gateway gracefully (same as v1)
 func (g *Gateway) Stop() error {
 	logger.Info("Initiating graceful gateway shutdown...")
 
-	// Step 1: 取消上下文 (与 v1 相同)
+	// Step 1: Cancel context (same as v1)
 	logger.Debug("Signaling all goroutines to stop")
 	g.cancel()
 
-	// Step 2: 🆕 停止传输层服务器
+	// Step 2: 🆕 Stop transport layer server
 	logger.Info("Shutting down transport server")
 	if err := g.transport.Close(); err != nil {
 		logger.Error("Error shutting down transport server", "err", err)
@@ -227,7 +226,7 @@ func (g *Gateway) Stop() error {
 		logger.Info("Transport server shutdown completed")
 	}
 
-	// Step 3: 停止所有代理服务器 (与 v1 相同)
+	// Step 3: Stop all proxy servers (same as v1)
 	logger.Info("Stopping proxy servers", "count", len(g.proxies))
 	for i, proxy := range g.proxies {
 		logger.Debug("Stopping proxy server", "index", i, "type", fmt.Sprintf("%T", proxy))
@@ -239,19 +238,19 @@ func (g *Gateway) Stop() error {
 	}
 	logger.Info("All proxy servers stopped")
 
-	// Step 4: 停止端口转发管理器 (与 v1 相同)
+	// Step 4: Stop port forwarding manager (same as v1)
 	logger.Debug("Stopping port forwarding manager")
 	g.portForwardMgr.Stop()
 	logger.Debug("Port forwarding manager stopped")
 
-	// Step 5: 等待客户端处理完成 (与 v1 相同)
+	// Step 5: Wait for client processing to complete (same as v1)
 	logger.Info("Waiting for clients to finish processing...")
 	select {
 	case <-g.ctx.Done():
 	case <-time.After(500 * time.Millisecond):
 	}
 
-	// Step 6: 停止所有客户端连接 (与 v1 相同)
+	// Step 6: Stop all client connections (same as v1)
 	g.clientsMu.RLock()
 	clientCount := len(g.clients)
 	g.clientsMu.RUnlock()
@@ -269,7 +268,7 @@ func (g *Gateway) Stop() error {
 		logger.Debug("No active client connections to stop")
 	}
 
-	// Step 7: 等待所有goroutine完成 (与 v1 相同)
+	// Step 7: Wait for all goroutines to finish (same as v1)
 	logger.Debug("Waiting for all goroutines to finish...")
 	done := make(chan struct{})
 	go func() {
@@ -289,22 +288,22 @@ func (g *Gateway) Stop() error {
 	return nil
 }
 
-// handleConnection 处理传输层连接 (🆕 适配传输层抽象，但逻辑与 v1 相同)
+// handleConnection handles transport layer connection (🆕 adapted to transport layer abstraction, but logic same as v1)
 func (g *Gateway) handleConnection(conn transport.Connection) {
-	// 从连接中提取客户端信息（现在是接口的正式部分）
+	// Extract client information from connection (now formal part of interface)
 	clientID := conn.GetClientID()
 	groupID := conn.GetGroupID()
 
 	logger.Info("Client connected", "client_id", clientID, "group_id", groupID, "remote_addr", conn.RemoteAddr())
 
-	// 创建客户端连接上下文
+	// Create client connection context
 	ctx, cancel := context.WithCancel(g.ctx)
 
-	// 创建客户端连接 (类似 v1 的 ClientConn)
+	// Create client connection (similar to v1's ClientConn)
 	client := &ClientConn{
 		ID:             clientID,
 		GroupID:        groupID,
-		Conn:           conn, // 🆕 使用传输层连接
+		Conn:           conn, // 🆕 Use transport layer connection
 		Conns:          make(map[string]*Conn),
 		msgChans:       make(map[string]chan map[string]interface{}),
 		ctx:            ctx,
@@ -312,29 +311,29 @@ func (g *Gateway) handleConnection(conn transport.Connection) {
 		portForwardMgr: g.portForwardMgr,
 	}
 
-	// 🆕 初始化消息处理器
+	// 🆕 Initialize message handler
 	client.msgHandler = message.NewGatewayExtendedMessageHandler(conn)
 
 	g.addClient(client)
 
-	// 🚨 修复：直接处理消息，阻塞直到连接关闭
-	// 这确保BiStream方法不会过早返回
+	// 🚨 Fix: Handle messages directly, block until connection closes
+	// This ensures BiStream method doesn't return prematurely
 	defer func() {
 		client.Stop()
 		g.removeClient(client.ID)
 		logger.Info("Client disconnected and cleaned up", "client_id", client.ID, "group_id", client.GroupID)
 	}()
 
-	// 处理客户端消息 - 这会阻塞直到连接关闭
+	// Handle client messages - this will block until connection closes
 	client.handleMessage()
 }
 
-// addClient adds a client to the gateway (与 v1 相同)
+// addClient adds a client to the gateway (same as v1)
 func (g *Gateway) addClient(client *ClientConn) {
 	g.clientsMu.Lock()
 	defer g.clientsMu.Unlock()
 
-	// 检查是否已存在客户端
+	// Check if client already exists
 	if existingClient, exists := g.clients[client.ID]; exists {
 		logger.Warn("Replacing existing client connection", "client_id", client.ID, "old_group_id", existingClient.GroupID, "new_group_id", client.GroupID)
 		existingClient.Stop()
@@ -343,13 +342,13 @@ func (g *Gateway) addClient(client *ClientConn) {
 	g.clients[client.ID] = client
 	if _, ok := g.groups[client.GroupID]; !ok {
 		g.groups[client.GroupID] = make(map[string]struct{})
-		g.groupClients[client.GroupID] = make([]string, 0) // 修复：初始化有序列表
-		g.groupCounters[client.GroupID] = 0                // 修复：初始化计数器
+		g.groupClients[client.GroupID] = make([]string, 0) // Fix: Initialize ordered list
+		g.groupCounters[client.GroupID] = 0                // Fix: Initialize counter
 		logger.Debug("Created new group", "group_id", client.GroupID)
 	}
 	g.groups[client.GroupID][client.ID] = struct{}{}
 
-	// 修复：添加到有序列表
+	// Fix: Add to ordered list
 	g.groupClients[client.GroupID] = append(g.groupClients[client.GroupID], client.ID)
 
 	groupSize := len(g.groups[client.GroupID])
@@ -357,7 +356,7 @@ func (g *Gateway) addClient(client *ClientConn) {
 	logger.Debug("Client added successfully", "client_id", client.ID, "group_id", client.GroupID, "group_size", groupSize, "total_clients", totalClients)
 }
 
-// removeClient removes a client from the gateway (与 v1 相同)
+// removeClient removes a client from the gateway (same as v1)
 func (g *Gateway) removeClient(clientID string) {
 	g.clientsMu.Lock()
 	defer g.clientsMu.Unlock()
@@ -368,14 +367,14 @@ func (g *Gateway) removeClient(clientID string) {
 		return
 	}
 
-	// 🚨 修复：添加缺失的端口清理调用（与 v1 保持一致）
+	// 🚨 Fix: Add missing port cleanup call (keep consistent with v1)
 	logger.Debug("Closing port forwarding for client", "client_id", clientID)
 	g.portForwardMgr.CloseClientPorts(clientID)
 
 	delete(g.clients, clientID)
 	delete(g.groups[client.GroupID], clientID)
 
-	// 修复：从有序列表中移除客户端
+	// Fix: Remove client from ordered list
 	if clients, ok := g.groupClients[client.GroupID]; ok {
 		for i, id := range clients {
 			if id == clientID {
@@ -387,8 +386,8 @@ func (g *Gateway) removeClient(clientID string) {
 
 	if len(g.groups[client.GroupID]) == 0 && client.GroupID != "" {
 		delete(g.groups, client.GroupID)
-		delete(g.groupClients, client.GroupID)  // 修复：清理有序列表
-		delete(g.groupCounters, client.GroupID) // 修复：清理计数器
+		delete(g.groupClients, client.GroupID)  // Fix: Clean up ordered list
+		delete(g.groupCounters, client.GroupID) // Fix: Clean up counter
 		logger.Debug("Removed empty group", "group_id", client.GroupID)
 	}
 
@@ -396,7 +395,7 @@ func (g *Gateway) removeClient(clientID string) {
 	logger.Info("Client removed successfully", "client_id", clientID, "group_id", client.GroupID, "remaining_clients", remainingClients)
 }
 
-// getClientByGroup 根据组获取客户端 (与 v1 相同)
+// getClientByGroup gets client by group (same as v1)
 func (g *Gateway) getClientByGroup(groupID string) (*ClientConn, error) {
 	g.clientsMu.Lock()
 	defer g.clientsMu.Unlock()
@@ -406,18 +405,18 @@ func (g *Gateway) getClientByGroup(groupID string) (*ClientConn, error) {
 		return nil, fmt.Errorf("no clients available in group: %s", groupID)
 	}
 
-	// 修复：实现真正的轮询负载均衡
-	// 获取当前计数器值
+	// Fix: Implement true round-robin load balancing
+	// Get current counter value
 	counter := g.groupCounters[groupID]
 
-	// 尝试最多 len(clients) 次找到健康的客户端
+	// Try up to len(clients) times to find a healthy client
 	for i := 0; i < len(clients); i++ {
-		// 计算当前索引
+		// Calculate current index
 		idx := (counter + i) % len(clients)
 		clientID := clients[idx]
 
 		if client, exists := g.clients[clientID]; exists {
-			// 更新计数器到下一个位置
+			// Update counter to next position
 			g.groupCounters[groupID] = (idx + 1) % len(clients)
 			return client, nil
 		}

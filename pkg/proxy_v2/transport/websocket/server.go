@@ -12,24 +12,24 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// webSocketTransport WebSocket传输层实现
+// webSocketTransport WebSocket transport layer implementation
 type webSocketTransport struct {
 	server     *http.Server
 	handler    func(transport.Connection)
 	upgrader   websocket.Upgrader
 	mu         sync.Mutex
 	running    bool
-	authConfig *transport.AuthConfig // 添加认证配置
+	authConfig *transport.AuthConfig // Add authentication configuration
 }
 
 var _ transport.Transport = (*webSocketTransport)(nil)
 
-// NewWebSocketTransport 创建新的WebSocket传输层
+// NewWebSocketTransport creates a new WebSocket transport layer
 func NewWebSocketTransport() transport.Transport {
 	return &webSocketTransport{
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(_ *http.Request) bool {
-				return true // 允许所有来源，生产环境应该限制
+				return true // Allow all origins, should be restricted in production
 			},
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -37,7 +37,7 @@ func NewWebSocketTransport() transport.Transport {
 	}
 }
 
-// NewWebSocketTransportWithAuth 创建带认证的WebSocket传输层
+// NewWebSocketTransportWithAuth creates a WebSocket transport layer with authentication
 func NewWebSocketTransportWithAuth(authConfig *transport.AuthConfig) transport.Transport {
 	return &webSocketTransport{
 		upgrader: websocket.Upgrader{
@@ -51,17 +51,17 @@ func NewWebSocketTransportWithAuth(authConfig *transport.AuthConfig) transport.T
 	}
 }
 
-// ListenAndServe 实现 Transport 接口 - 服务器端监听（HTTP）
+// ListenAndServe implements Transport interface - server side listening (HTTP)
 func (s *webSocketTransport) ListenAndServe(addr string, handler func(transport.Connection)) error {
 	return s.listenAndServe(addr, handler, nil)
 }
 
-// ListenAndServeWithTLS 实现 Transport 接口 - 服务器端监听（HTTPS/WSS）(🆕 从 v1 迁移)
+// ListenAndServeWithTLS implements Transport interface - server side listening (HTTPS/WSS) (🆕 migrated from v1)
 func (s *webSocketTransport) ListenAndServeWithTLS(addr string, handler func(transport.Connection), tlsConfig *tls.Config) error {
 	return s.listenAndServe(addr, handler, tlsConfig)
 }
 
-// listenAndServe 统一的服务器启动逻辑 (🆕 支持 TLS)
+// listenAndServe unified server startup logic (🆕 supports TLS)
 func (s *webSocketTransport) listenAndServe(addr string, handler func(transport.Connection), tlsConfig *tls.Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -78,23 +78,23 @@ func (s *webSocketTransport) listenAndServe(addr string, handler func(transport.
 	}
 	logger.Info("Starting WebSocket server", "listen_addr", addr, "protocol", protocol)
 
-	// 创建HTTP服务器
+	// Create HTTP server
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleWebSocket)
 
 	s.server = &http.Server{
 		Addr:              addr,
 		Handler:           mux,
-		TLSConfig:         tlsConfig,        // 🆕 设置 TLS 配置
+		TLSConfig:         tlsConfig,        // 🆕 Set TLS configuration
 		ReadHeaderTimeout: 10 * time.Second, // Prevent Slowloris attacks
 	}
 
-	// 启动服务器
+	// Start server
 	go func() {
 		var err error
 		if tlsConfig != nil {
 			logger.Info("Starting HTTPS WebSocket server (WSS)", "addr", addr)
-			// 🆕 使用 TLS 启动服务器（与 v1 相同）
+			// 🆕 Start server with TLS (same as v1)
 			err = s.server.ListenAndServeTLS("", "")
 		} else {
 			logger.Info("Starting HTTP WebSocket server (WS)", "addr", addr)
@@ -113,15 +113,15 @@ func (s *webSocketTransport) listenAndServe(addr string, handler func(transport.
 	return nil
 }
 
-// DialWithConfig 使用配置连接到服务器 (🆕 使用高性能连接)
+// DialWithConfig connects to server using configuration (🆕 using high-performance connection)
 func (s *webSocketTransport) DialWithConfig(addr string, config *transport.ClientConfig) (transport.Connection, error) {
 	logger.Debug("WebSocket transport dialing with config", "addr", addr, "client_id", config.ClientID, "group_id", config.GroupID, "tls_enabled", config.TLSConfig != nil)
 
-	// 🆕 使用高性能的 WebSocket 连接实现
+	// 🆕 Use high-performance WebSocket connection implementation
 	return s.dialWebSocketWithConfig(addr, config)
 }
 
-// Close 实现 Transport 接口 - 关闭传输层
+// Close implements Transport interface - close transport layer
 func (s *webSocketTransport) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -143,9 +143,9 @@ func (s *webSocketTransport) Close() error {
 	return err
 }
 
-// handleWebSocket 处理WebSocket连接升级 (基于 v1 的认证逻辑)
+// handleWebSocket handles WebSocket connection upgrade (based on v1 authentication logic)
 func (s *webSocketTransport) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// 获取客户端ID (与 v1 相同)
+	// Get client ID (same as v1)
 	clientID := r.Header.Get("X-Client-ID")
 	if clientID == "" {
 		logger.Warn("WebSocket connection rejected: missing client ID", "remote_addr", r.RemoteAddr, "user_agent", r.Header.Get("User-Agent"))
@@ -153,11 +153,11 @@ func (s *webSocketTransport) handleWebSocket(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// 获取组ID (与 v1 相同)
+	// Get group ID (same as v1)
 	groupID := r.Header.Get("X-Group-ID")
 	logger.Debug("WebSocket connection attempt", "client_id", clientID, "group_id", groupID, "remote_addr", r.RemoteAddr)
 
-	// 认证检查 (与 v1 相同)
+	// Authentication check (same as v1)
 	if s.authConfig != nil && s.authConfig.Username != "" {
 		username, password, ok := r.BasicAuth()
 		if !ok {
@@ -175,7 +175,7 @@ func (s *webSocketTransport) handleWebSocket(w http.ResponseWriter, r *http.Requ
 		logger.Debug("Client authentication successful", "client_id", clientID)
 	}
 
-	// 升级到WebSocket
+	// Upgrade to WebSocket
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.Error("Failed to upgrade WebSocket connection", "client_id", clientID, "remote_addr", r.RemoteAddr, "err", err)
@@ -184,24 +184,24 @@ func (s *webSocketTransport) handleWebSocket(w http.ResponseWriter, r *http.Requ
 
 	logger.Debug("WebSocket connection upgraded successfully", "client_id", clientID)
 
-	// 创建带有客户端信息的连接包装器
+	// Create connection wrapper with client information
 	wsConn := NewWebSocketConnectionWithInfo(conn, clientID, groupID)
 
 	logger.Info("Client connected", "client_id", clientID, "group_id", groupID, "remote_addr", r.RemoteAddr)
 
-	// 调用连接处理器，不使用recover掩盖问题
+	// Call connection handler, don't use recover to hide issues
 	defer func() {
 		if err := wsConn.Close(); err != nil {
-			logger.Debug("Error closing websocket connection", "err", err)
+			logger.Warn("Error closing websocket connection", "err", err)
 		}
 		logger.Info("Client disconnected from WebSocket", "client_id", clientID, "group_id", groupID)
 	}()
 
-	// 调用连接处理器
+	// Call connection handler
 	s.handler(wsConn)
 }
 
 func init() {
-	// 注册 WebSocket 传输层创建器
+	// Register WebSocket transport layer creator
 	transport.RegisterTransportCreator(protocol.TransportTypeWebSocket, NewWebSocketTransportWithAuth)
 }

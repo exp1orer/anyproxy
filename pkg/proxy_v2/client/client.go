@@ -22,31 +22,31 @@ import (
 	_ "github.com/buhuipao/anyproxy/pkg/proxy_v2/transport/websocket"
 )
 
-// Client 客户端结构 (基于 v1，但使用传输层抽象)
+// Client struct (based on v1, but using transport layer abstraction)
 type Client struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	config     *config.ClientConfig
-	conn       transport.Connection          // 🆕 使用传输层连接
-	transport  transport.Transport           // 🆕 传输层实例
-	connMgr    *connection.ConnectionManager // 🆕 使用公共连接管理器
+	conn       transport.Connection // 🆕 Use transport layer connection
+	transport  transport.Transport  // 🆕 Transport layer instance
+	connMgr    *connection.Manager  // 🆕 Use shared connection manager
 	wg         sync.WaitGroup
 	actualID   string
 	replicaIdx int
 
-	// 🆕 公共消息处理器
+	// 🆕 Shared message handler
 	msgHandler message.ExtendedMessageHandler
 
-	// 修复：预编译的正则表达式，避免在每次请求时重新编译
-	forbiddenHostsRe []*regexp.Regexp // 修复：预编译的禁止主机正则表达式
-	allowedHostsRe   []*regexp.Regexp // 修复：预编译的允许主机正则表达式
+	// Fix: Pre-compiled regular expressions to avoid recompiling on each request
+	forbiddenHostsRe []*regexp.Regexp // Fix: Pre-compiled forbidden host regular expressions
+	allowedHostsRe   []*regexp.Regexp // Fix: Pre-compiled allowed host regular expressions
 }
 
-// NewClient creates a new proxy client (与 v1 相似，但支持传输层选择)
+// NewClient creates a new proxy client (similar to v1, but supports transport layer selection)
 func NewClient(cfg *config.ClientConfig, transportType string, replicaIdx int) (*Client, error) {
 	logger.Info("Creating new client", "client_id", cfg.ClientID, "replica_idx", replicaIdx, "gateway_addr", cfg.GatewayAddr, "group_id", cfg.GroupID, "transport_type", transportType, "allowed_hosts_count", len(cfg.AllowedHosts), "forbidden_hosts_count", len(cfg.ForbiddenHosts), "open_ports_count", len(cfg.OpenPorts), "auth_enabled", cfg.AuthUsername != "")
 
-	// 记录安全策略详细信息
+	// Log security policy details
 	if len(cfg.ForbiddenHosts) > 0 {
 		logger.Info("Security policy: forbidden hosts configured", "client_id", cfg.ClientID, "forbidden_hosts", cfg.ForbiddenHosts, "count", len(cfg.ForbiddenHosts))
 	}
@@ -57,7 +57,7 @@ func NewClient(cfg *config.ClientConfig, transportType string, replicaIdx int) (
 		logger.Warn("Security policy: no allowed hosts configured, all non-forbidden hosts will be allowed", "client_id", cfg.ClientID)
 	}
 
-	// 记录端口转发配置
+	// Log port forwarding configuration
 	if len(cfg.OpenPorts) > 0 {
 		logger.Info("Port forwarding configured", "client_id", cfg.ClientID, "port_count", len(cfg.OpenPorts))
 		for i, port := range cfg.OpenPorts {
@@ -67,7 +67,7 @@ func NewClient(cfg *config.ClientConfig, transportType string, replicaIdx int) (
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// 🆕 创建传输层 - 唯一的新增逻辑
+	// 🆕 Create transport layer - the only new logic
 	transportImpl := transport.CreateTransport(transportType, &transport.AuthConfig{
 		Username: cfg.AuthUsername,
 		Password: cfg.AuthPassword,
@@ -77,19 +77,19 @@ func NewClient(cfg *config.ClientConfig, transportType string, replicaIdx int) (
 		return nil, fmt.Errorf("unsupported transport type: %s", transportType)
 	}
 
-	// 生成唯一的客户端ID (与 v1 相同)
+	// Generate unique client ID (same as v1)
 
 	client := &Client{
 		config:     cfg,
 		transport:  transportImpl,
-		replicaIdx: replicaIdx,                                    // 修复：设置副本索引
-		connMgr:    connection.NewConnectionManager(cfg.ClientID), // 传递客户端ID
+		replicaIdx: replicaIdx,                          // Fix: Set replica index
+		connMgr:    connection.NewManager(cfg.ClientID), // Pass client ID
 		ctx:        ctx,
 		cancel:     cancel,
-		// 正则表达式将在 compileHostPatterns 中初始化
+		// Regular expressions will be initialized in compileHostPatterns
 	}
 
-	// 修复：预编译正则表达式以提高性能
+	// Fix: Pre-compile regular expressions for better performance
 	if err := client.compileHostPatterns(); err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to compile host patterns: %v", err)
@@ -102,14 +102,14 @@ func NewClient(cfg *config.ClientConfig, transportType string, replicaIdx int) (
 	return client, nil
 }
 
-// Start starts the client with automatic reconnection (与 v1 相同)
+// Start starts the client with automatic reconnection (same as v1)
 func (c *Client) Start() error {
 	logger.Info("Starting proxy client", "client_id", c.getClientID(), "gateway_addr", c.config.GatewayAddr, "group_id", c.config.GroupID)
 
-	// 启动性能指标报告器（每30秒报告一次）
+	// Start performance metrics reporter (report every 30 seconds)
 	monitoring.StartMetricsReporter(30 * time.Second)
 
-	// 启动主连接循环 (与 v1 相同)
+	// Start main connection loop (same as v1)
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
@@ -121,37 +121,37 @@ func (c *Client) Start() error {
 	return nil
 }
 
-// Stop stops the client gracefully (与 v1 相同)
+// Stop stops the client gracefully (same as v1)
 func (c *Client) Stop() error {
 	logger.Info("Initiating graceful client stop", "client_id", c.getClientID())
 
-	// Step 1: 取消上下文 (与 v1 相同)
+	// Step 1: Cancel context (same as v1)
 	logger.Debug("Cancelling client context", "client_id", c.getClientID())
 	c.cancel()
 
-	// Step 2: 获取连接数量 (与 v1 相同)
+	// Step 2: Get connection count (same as v1)
 	connectionCount := c.connMgr.GetConnectionCount()
 
 	if connectionCount > 0 {
 		logger.Info("Waiting for active connections to finish", "client_id", c.getClientID(), "connection_count", connectionCount)
 	}
 
-	// 等待现有连接完成 (与 v1 相同)
+	// Wait for existing connections to finish (same as v1)
 	select {
 	case <-c.ctx.Done():
 	case <-time.After(500 * time.Millisecond):
 	}
 
-	// Step 3: 🆕 停止传输层连接
+	// Step 3: 🆕 Stop transport layer connection
 	if c.conn != nil {
 		logger.Debug("Stopping transport connection during cleanup", "client_id", c.getClientID())
 		if err := c.conn.Close(); err != nil {
-			logger.Debug("Error closing client connection during stop", "err", err)
+			logger.Debug("Error closing client connection during stop (expected)", "err", err)
 		}
 		logger.Debug("Transport connection stopped", "client_id", c.getClientID())
 	}
 
-	// Step 4: 关闭所有连接 (与 v1 相同)
+	// Step 4: Close all connections (same as v1)
 	logger.Debug("Closing all connections", "client_id", c.getClientID(), "connection_count", connectionCount)
 	c.connMgr.CloseAllConnections()
 	c.connMgr.CloseAllMessageChannels()
@@ -159,7 +159,7 @@ func (c *Client) Stop() error {
 		logger.Debug("All connections closed", "client_id", c.getClientID())
 	}
 
-	// Step 5: 等待所有goroutine完成 (与 v1 相同)
+	// Step 5: Wait for all goroutines to finish (same as v1)
 	logger.Debug("Waiting for all goroutines to finish", "client_id", c.getClientID())
 	done := make(chan struct{})
 	go func() {
@@ -174,7 +174,7 @@ func (c *Client) Stop() error {
 		logger.Warn("Timeout waiting for client goroutines to finish", "client_id", c.getClientID())
 	}
 
-	// 停止指标报告器
+	// Stop metrics reporter
 	monitoring.StopMetricsReporter()
 
 	logger.Info("Client shutdown completed", "client_id", c.getClientID(), "connections_closed", connectionCount)

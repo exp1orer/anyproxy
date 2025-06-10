@@ -31,7 +31,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create and start gateway (使用 WebSocket 传输层)
+	// Create and start gateway (using WebSocket transport layer)
 	gw, err := gateway.NewGateway(cfg, cfg.Transport.Type)
 	if err != nil {
 		logger.Error("Failed to create gateway", "err", err)

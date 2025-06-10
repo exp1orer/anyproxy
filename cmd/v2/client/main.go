@@ -34,8 +34,8 @@ func main() {
 
 	var clients []*client.Client
 	for i := 0; i < cfg.Client.Replicas; i++ {
-		// Create and start client (使用 WebSocket 传输层)
-		// 修复：传递副本索引 i，确保每个客户端有唯一的 ID
+		// Create and start client (using WebSocket transport layer)
+		// Fix: Pass replica index i to ensure each client has unique ID
 		proxyClient, err := client.NewClient(&cfg.Client, cfg.Transport.Type, i)
 		if err != nil {
 			logger.Error("Failed to create client", "replica_idx", i, "err", err)

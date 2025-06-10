@@ -15,7 +15,7 @@ type ConnWrapper struct {
 	localAddr     net.Addr
 	remoteAddr    net.Addr
 	connID        string
-	mu            sync.RWMutex // 添加读写锁保护 connID
+	mu            sync.RWMutex // Add read-write lock to protect connID
 	network       string
 	remoteAddress string
 }
@@ -52,7 +52,7 @@ func NewConnWrapper(conn net.Conn, network, address string) *ConnWrapper {
 func parseAddress(network, address string) net.Addr {
 	// Handle empty address
 	if address == "" {
-		if network == protocol.ProtocolTCP || network == "tcp" {
+		if network == protocol.ProtocolTCP {
 			return &net.TCPAddr{IP: net.IPv4(0, 0, 0, 0), Port: 80}
 		}
 		return &net.UDPAddr{IP: net.IPv4(0, 0, 0, 0), Port: 0}
@@ -63,7 +63,7 @@ func parseAddress(network, address string) net.Addr {
 	if err != nil {
 		// If parsing fails, assume it's just a host without port
 		host = address
-		if network == protocol.ProtocolTCP || network == "tcp" {
+		if network == protocol.ProtocolTCP {
 			portStr = "80" // Default HTTP port for TCP
 		} else {
 			portStr = "0"
@@ -85,17 +85,18 @@ func parseAddress(network, address string) net.Addr {
 		}
 	}
 
-	// Return appropriate address type
-	if network == protocol.ProtocolTCP || network == "tcp" {
+	// Return appropriate address type based on network protocol
+	switch network {
+	case protocol.ProtocolTCP:
 		return &net.TCPAddr{IP: ip, Port: port}
-	} else if network == protocol.ProtocolUDP || network == "udp" {
+	case protocol.ProtocolUDP:
 		return &net.UDPAddr{IP: ip, Port: port}
-	}
-
-	// For other protocols, return virtualAddr
-	return &virtualAddr{
-		network: network,
-		address: address,
+	default:
+		// For other protocols, return virtualAddr
+		return &virtualAddr{
+			network: network,
+			address: address,
+		}
 	}
 }
 
@@ -123,7 +124,7 @@ func (cw *ConnWrapper) SetConnID(connID string) {
 	cw.connID = connID
 }
 
-// virtualAddr 实现 net.Addr 接口
+// virtualAddr implements net.Addr interface
 type virtualAddr struct {
 	network string
 	address string

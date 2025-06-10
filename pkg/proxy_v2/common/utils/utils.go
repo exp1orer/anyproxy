@@ -1,3 +1,5 @@
+// Package utils provides common utility functions and helpers for the anyproxy v2 system.
+// It includes string manipulation, data conversion, and other general-purpose utilities.
 package utils
 
 import (
@@ -25,7 +27,7 @@ func GenerateConnID() string {
 	return xid.New().String()
 }
 
-// GetMessageFields 获取消息的所有字段名（用于调试）
+// GetMessageFields gets all field names from a message (for debugging)
 func GetMessageFields(msg map[string]interface{}) []string {
 	fields := make([]string, 0, len(msg))
 	for key := range msg {

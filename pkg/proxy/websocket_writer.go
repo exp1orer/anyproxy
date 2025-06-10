@@ -54,7 +54,7 @@ func (w *WebSocketWriter) Stop() {
 		w.wg.Wait()
 
 		if err := w.conn.Close(); err != nil {
-			logger.Debug("Error closing WebSocket", "id", w.connectionID, "err", err)
+			logger.Warn("Error closing WebSocket", "id", w.connectionID, "err", err)
 		}
 
 		logger.Info("WebSocket writer stopped", "id", w.connectionID, "msgs", w.messageCount)
@@ -116,7 +116,9 @@ func (w *WebSocketWriter) drainMessages() {
 			if !ok {
 				return
 			}
-			w.conn.SetWriteDeadline(time.Now().Add(time.Second))
+			if err := w.conn.SetWriteDeadline(time.Now().Add(time.Second)); err != nil {
+				logger.Warn("Failed to set write deadline during drain", "id", w.connectionID, "err", err)
+			}
 			if err := w.conn.WriteJSON(msg); err != nil {
 				logger.Error("Error draining", "id", w.connectionID, "err", err)
 				return

@@ -124,7 +124,7 @@ func TestRouteMessage(t *testing.T) {
 				config: &config.ClientConfig{
 					ClientID: "test-client",
 				},
-				connMgr: connection.NewConnectionManager("test-client"),
+				connMgr: connection.NewManager("test-client"),
 				ctx:     context.Background(),
 			}
 
@@ -252,7 +252,7 @@ func TestHandleDataMessage(t *testing.T) {
 				config: &config.ClientConfig{
 					ClientID: "test-client",
 				},
-				connMgr: connection.NewConnectionManager("test-client"),
+				connMgr: connection.NewManager("test-client"),
 				ctx:     context.Background(),
 			}
 
@@ -326,7 +326,7 @@ func TestHandleCloseMessage(t *testing.T) {
 				config: &config.ClientConfig{
 					ClientID: "test-client",
 				},
-				connMgr: connection.NewConnectionManager("test-client"),
+				connMgr: connection.NewManager("test-client"),
 			}
 
 			// Add connection if needed
@@ -354,7 +354,7 @@ func TestCreateMessageChannel(t *testing.T) {
 		config: &config.ClientConfig{
 			ClientID: "test-client",
 		},
-		connMgr: connection.NewConnectionManager("test-client"),
+		connMgr: connection.NewManager("test-client"),
 		ctx:     context.Background(),
 		wg:      sync.WaitGroup{},
 	}
@@ -425,7 +425,7 @@ func TestProcessConnectionMessages(t *testing.T) {
 					ClientID: "test-client",
 				},
 				ctx:     ctx,
-				connMgr: connection.NewConnectionManager("test-client"),
+				connMgr: connection.NewManager("test-client"),
 			}
 
 			// Create message channel

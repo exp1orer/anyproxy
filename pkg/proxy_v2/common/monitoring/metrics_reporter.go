@@ -8,17 +8,17 @@ import (
 	"github.com/buhuipao/anyproxy/pkg/logger"
 )
 
-// MetricsReporter 指标报告器
+// MetricsReporter metrics reporter
 type MetricsReporter struct {
 	interval time.Duration
 	ctx      context.Context
 	cancel   context.CancelFunc
 }
 
-// NewMetricsReporter 创建指标报告器
+// NewMetricsReporter creates metrics reporter
 func NewMetricsReporter(interval time.Duration) *MetricsReporter {
 	if interval <= 0 {
-		interval = 30 * time.Second // 默认30秒
+		interval = 30 * time.Second // Default 30 seconds
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &MetricsReporter{
@@ -28,17 +28,17 @@ func NewMetricsReporter(interval time.Duration) *MetricsReporter {
 	}
 }
 
-// Start 启动定期报告
+// Start starts periodic reporting
 func (r *MetricsReporter) Start() {
 	go r.run()
 }
 
-// Stop 停止报告
+// Stop stops reporting
 func (r *MetricsReporter) Stop() {
 	r.cancel()
 }
 
-// run 运行报告循环
+// run runs reporting loop
 func (r *MetricsReporter) run() {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
@@ -53,16 +53,16 @@ func (r *MetricsReporter) run() {
 	}
 }
 
-// report 生成并输出报告
+// report generates and outputs report
 func (r *MetricsReporter) report() {
 	metrics := GetMetrics()
 
-	// 只在有活动时输出
+	// Only output when there's activity
 	if metrics.TotalConnections == 0 && metrics.BytesSent == 0 && metrics.BytesReceived == 0 {
 		return
 	}
 
-	// 简洁的一行输出
+	// Concise one-line output
 	logger.Info("Performance",
 		"uptime", fmt.Sprintf("%dm", int(metrics.Uptime().Minutes())),
 		"conns", fmt.Sprintf("%d/%d", metrics.ActiveConnections, metrics.TotalConnections),
@@ -73,10 +73,10 @@ func (r *MetricsReporter) report() {
 	)
 }
 
-// 全局报告器实例
+// Global reporter instance
 var globalReporter *MetricsReporter
 
-// StartMetricsReporter 启动全局指标报告器
+// StartMetricsReporter starts global metrics reporter
 func StartMetricsReporter(interval time.Duration) {
 	if globalReporter != nil {
 		globalReporter.Stop()
@@ -85,7 +85,7 @@ func StartMetricsReporter(interval time.Duration) {
 	globalReporter.Start()
 }
 
-// StopMetricsReporter 停止全局指标报告器
+// StopMetricsReporter stops global metrics reporter
 func StopMetricsReporter() {
 	if globalReporter != nil {
 		globalReporter.Stop()

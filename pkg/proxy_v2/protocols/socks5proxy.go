@@ -1,20 +1,21 @@
-package proxy_protocols
+// Package protocols provides SOCKS5 proxy implementation for anyproxy v2.
+package protocols
 
 import (
 	"context"
 	"fmt"
 	"log"
 	"net"
+	"strings"
 
 	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/buhuipao/anyproxy/pkg/logger"
-	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/connection"
 	commonctx "github.com/buhuipao/anyproxy/pkg/proxy_v2/common/context"
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/utils"
 	"github.com/things-go/go-socks5"
 )
 
-// SOCKS5Proxy SOCKS5代理实现 (基于 v1 设计)
+// SOCKS5Proxy SOCKS5 proxy implementation (based on v1 design)
 type SOCKS5Proxy struct {
 	config         *config.SOCKS5Config
 	server         *socks5.Server
@@ -23,7 +24,7 @@ type SOCKS5Proxy struct {
 	listener       net.Listener
 }
 
-// NewSOCKS5ProxyWithAuth creates a new SOCKS5 proxy with authentication (与 v1 相同)
+// NewSOCKS5ProxyWithAuth creates a new SOCKS5 proxy with authentication (same as v1)
 func NewSOCKS5ProxyWithAuth(cfg *config.SOCKS5Config, dialFn func(context.Context, string, string) (net.Conn, error), groupExtractor func(string) string) (utils.GatewayProxy, error) {
 	logger.Info("Creating SOCKS5 proxy", "listen_addr", cfg.ListenAddr, "auth_enabled", cfg.AuthUsername != "")
 
@@ -33,13 +34,13 @@ func NewSOCKS5ProxyWithAuth(cfg *config.SOCKS5Config, dialFn func(context.Contex
 		groupExtractor: groupExtractor,
 	}
 
-	// 配置认证方法 (与 v1 相同)
+	// Configure authentication methods (same as v1)
 	socks5Auths := []socks5.Authenticator{}
 
 	if cfg.AuthUsername != "" && cfg.AuthPassword != "" {
 		logger.Debug("Configuring SOCKS5 authentication", "auth_username", cfg.AuthUsername)
 
-		// 使用内置的 UserPassAuthenticator 和自定义凭证存储 (与 v1 相同)
+		// Use built-in UserPassAuthenticator with custom credential store (same as v1)
 		credStore := &GroupBasedCredentialStore{
 			ConfigUsername: cfg.AuthUsername,
 			ConfigPassword: cfg.AuthPassword,
@@ -52,9 +53,9 @@ func NewSOCKS5ProxyWithAuth(cfg *config.SOCKS5Config, dialFn func(context.Contex
 		logger.Debug("No authentication configured for SOCKS5 proxy")
 	}
 
-	// 创建包装的拨号函数，支持组信息提取 (与 v1 相同)
+	// Create wrapped dial function with group information extraction support (same as v1)
 	wrappedDialFunc := func(ctx context.Context, network, addr string, request *socks5.Request) (net.Conn, error) {
-		// 生成新的连接ID
+		// Generate new connection ID
 		connID := utils.GenerateConnID()
 
 		clientAddr := "unknown"
@@ -63,12 +64,12 @@ func NewSOCKS5ProxyWithAuth(cfg *config.SOCKS5Config, dialFn func(context.Contex
 		}
 		logger.Info("SOCKS5 dial request received", "conn_id", connID, "network", network, "address", addr, "client", clientAddr)
 
-		// 将连接ID添加到上下文
+		// Add connection ID to context
 		ctx = commonctx.WithConnID(ctx, connID)
 
 		var userCtx *utils.UserContext
 
-		// 从请求的 AuthContext 中提取用户信息 (与 v1 相同)
+		// Extract user information from request's AuthContext (same as v1)
 		if request.AuthContext != nil && request.AuthContext.Payload != nil {
 			if username, exists := request.AuthContext.Payload["username"]; exists {
 				groupID := ""
@@ -86,16 +87,16 @@ func NewSOCKS5ProxyWithAuth(cfg *config.SOCKS5Config, dialFn func(context.Contex
 			}
 		}
 
-		// 如果没有提取到用户上下文，创建默认的 (与 v1 相同)
+		// If no user context extracted, create default one (same as v1)
 		if userCtx == nil {
 			userCtx = &utils.UserContext{
-				Username: "socks5-user", // SOCKS5 的默认用户名
-				GroupID:  "",            // 默认组
+				Username: "socks5-user", // Default username for SOCKS5
+				GroupID:  "",            // Default group
 			}
 			logger.Debug("Using default user context for SOCKS5 request", "conn_id", connID, "default_username", userCtx.Username, "target_addr", addr)
 		}
 
-		// 将用户上下文添加到 context (与 v1 相同)
+		// Add user context to context (same as v1)
 		type userContextKey string
 		const userKey userContextKey = "user"
 		ctx = context.WithValue(ctx, userKey, userCtx)
@@ -109,18 +110,20 @@ func NewSOCKS5ProxyWithAuth(cfg *config.SOCKS5Config, dialFn func(context.Contex
 			return nil, err
 		}
 
-		// 连接已经建立，不需要再从 ConnWrapper 获取 ID，因为我们已经有了
+		// Connection already established, no need to get ID from ConnWrapper again since we already have it
 
 		logger.Info("SOCKS5 dial successful", "conn_id", connID, "network", network, "address", addr, "username", userCtx.Username, "group_id", userCtx.GroupID)
 
+		return conn, nil
+
 		// 🚨 Fix: Wrap the connection to include the remote address information
-		wrappedConn := connection.NewConnWrapper(conn, network, addr)
-		return wrappedConn, nil
+		// wrappedConn := connection.NewConnWrapper(conn, network, addr)
+		// return wrappedConn, nil
 	}
 
 	logger.Debug("Configuring SOCKS5 server", "listen_addr", cfg.ListenAddr, "auth_methods_count", len(socks5Auths))
 
-	// 创建 SOCKS5 服务器 (与 v1 相同)
+	// Create SOCKS5 server (same as v1)
 	server := socks5.NewServer(
 		socks5.WithAuthMethods(socks5Auths),
 		socks5.WithDialAndRequest(wrappedDialFunc),
@@ -132,11 +135,11 @@ func NewSOCKS5ProxyWithAuth(cfg *config.SOCKS5Config, dialFn func(context.Contex
 	return proxy, nil
 }
 
-// Start starts the SOCKS5 proxy server (与 v1 相同)
+// Start starts the SOCKS5 proxy server (same as v1)
 func (p *SOCKS5Proxy) Start() error {
 	logger.Info("Starting SOCKS5 proxy server", "listen_addr", p.config.ListenAddr)
 
-	// 创建监听器 (与 v1 相同)
+	// Create listener (same as v1)
 	logger.Debug("Creating TCP listener for SOCKS5", "address", p.config.ListenAddr)
 	listener, err := net.Listen("tcp", p.config.ListenAddr)
 	if err != nil {
@@ -146,11 +149,16 @@ func (p *SOCKS5Proxy) Start() error {
 	p.listener = listener
 	logger.Debug("TCP listener created successfully for SOCKS5", "listen_addr", p.config.ListenAddr)
 
-	// 在单独的 goroutine 中启动 SOCKS5 服务器 (与 v1 相同)
+	// Start SOCKS5 server in separate goroutine (same as v1)
 	go func() {
 		logger.Info("SOCKS5 server starting to serve requests", "listen_addr", p.config.ListenAddr)
 		if err := p.server.Serve(listener); err != nil {
-			logger.Error("SOCKS5 server terminated unexpectedly", "listen_addr", p.config.ListenAddr, "err", err)
+			// Check if the error is due to listener being closed (normal shutdown)
+			if strings.Contains(err.Error(), "use of closed network connection") {
+				logger.Info("SOCKS5 server stopped normally", "listen_addr", p.config.ListenAddr)
+			} else {
+				logger.Error("SOCKS5 server terminated unexpectedly", "listen_addr", p.config.ListenAddr, "err", err)
+			}
 		} else {
 			logger.Info("SOCKS5 server stopped", "listen_addr", p.config.ListenAddr)
 		}
@@ -161,7 +169,7 @@ func (p *SOCKS5Proxy) Start() error {
 	return nil
 }
 
-// Stop stops the SOCKS5 proxy server (与 v1 相同)
+// Stop stops the SOCKS5 proxy server (same as v1)
 func (p *SOCKS5Proxy) Stop() error {
 	logger.Info("Initiating SOCKS5 proxy server shutdown", "listen_addr", p.config.ListenAddr)
 
@@ -182,26 +190,26 @@ func (p *SOCKS5Proxy) Stop() error {
 	return nil
 }
 
-// GetListenAddr returns the listen address (与 v1 相同)
+// GetListenAddr returns the listen address (same as v1)
 func (p *SOCKS5Proxy) GetListenAddr() string {
 	return p.config.ListenAddr
 }
 
-// GroupBasedCredentialStore implements CredentialStore interface with support for group-based usernames (与 v1 相同)
+// GroupBasedCredentialStore implements CredentialStore interface with support for group-based usernames (same as v1)
 type GroupBasedCredentialStore struct {
 	ConfigUsername string
 	ConfigPassword string
 }
 
-// Valid implements the CredentialStore interface (与 v1 相同)
+// Valid implements the CredentialStore interface (same as v1)
 // Supports usernames in format "username.group_id" by extracting the base username for authentication
 func (g *GroupBasedCredentialStore) Valid(user, password, userAddr string) bool {
 	logger.Debug("SOCKS5 authentication attempt", "username", user, "client", userAddr)
 
-	// 提取基础用户名 (与 v1 相同)
+	// Extract base username (same as v1)
 	baseUsername := extractBaseUsername(user)
 
-	// 验证凭证 (与 v1 相同)
+	// Verify credentials (same as v1)
 	isValid := baseUsername == g.ConfigUsername && password == g.ConfigPassword
 
 	if isValid {

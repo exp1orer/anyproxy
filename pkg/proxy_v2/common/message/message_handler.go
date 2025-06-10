@@ -1,3 +1,5 @@
+// Package message provides message handling interfaces and utilities for the anyproxy v2 system.
+// It defines the core message processing abstractions including MessageConnection and MessageHandler.
 package message
 
 import (
@@ -7,57 +9,60 @@ import (
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
 )
 
-// MessageConnection 定义消息连接接口，避免循环导入
-type MessageConnection interface {
-	// 写入消息（二进制数据）
+// Connection represents a connection that can handle binary messages
+// (renamed from MessageConnection to avoid stuttering)
+type Connection interface {
+	// Write message (binary data)
 	WriteMessage(data []byte) error
-	// 读取消息
+	// Read message
 	ReadMessage() ([]byte, error)
+	Close() error
 }
 
-// MessageHandler 定义消息处理器接口
-type MessageHandler interface {
-	// 读取下一条消息
+// Handler defines the interface for handling binary protocol messages
+// (renamed from MessageHandler to avoid stuttering)
+type Handler interface {
+	// Read next message
 	ReadNextMessage() (map[string]interface{}, error)
-	// 解析二进制消息
+	// Parse binary message
 	ParseBinaryMessage(msgData []byte) (map[string]interface{}, error)
-	// 发送数据消息
+	// Send data message
 	WriteDataMessage(connID string, data []byte) error
-	// 发送关闭消息
+	// Send close message
 	WriteCloseMessage(connID string) error
 }
 
-// BinaryMessageHandler 二进制消息处理器的通用实现
+// BinaryMessageHandler common implementation of binary message handler
 type BinaryMessageHandler struct {
-	conn     MessageConnection
-	isClient bool // 用于区分客户端和网关的消息类型
+	conn     Connection
+	isClient bool // Used to distinguish between client and gateway message types
 }
 
-// NewClientMessageHandler 创建客户端消息处理器
-func NewClientMessageHandler(conn MessageConnection) MessageHandler {
+// NewClientMessageHandler creates client message handler
+func NewClientMessageHandler(conn Connection) Handler {
 	return &BinaryMessageHandler{
 		conn:     conn,
 		isClient: true,
 	}
 }
 
-// NewGatewayMessageHandler 创建网关消息处理器
-func NewGatewayMessageHandler(conn MessageConnection) MessageHandler {
+// NewGatewayMessageHandler creates gateway message handler
+func NewGatewayMessageHandler(conn Connection) Handler {
 	return &BinaryMessageHandler{
 		conn:     conn,
 		isClient: false,
 	}
 }
 
-// ReadNextMessage 读取下一条消息，完全使用二进制格式
+// ReadNextMessage reads the next message, using binary format completely
 func (h *BinaryMessageHandler) ReadNextMessage() (map[string]interface{}, error) {
-	// 读取原始消息数据
+	// Read raw message data
 	msgData, err := h.conn.ReadMessage()
 	if err != nil {
 		return nil, err
 	}
 
-	// 检查是否是二进制协议消息
+	// Check if it's a binary protocol message
 	if !protocol.IsBinaryMessage(msgData) {
 		return nil, fmt.Errorf("received non-binary message")
 	}
@@ -65,44 +70,44 @@ func (h *BinaryMessageHandler) ReadNextMessage() (map[string]interface{}, error)
 	return h.ParseBinaryMessage(msgData)
 }
 
-// ParseBinaryMessage 解析二进制消息为兼容的 map 格式
+// ParseBinaryMessage parses binary message to compatible map format
 func (h *BinaryMessageHandler) ParseBinaryMessage(msgData []byte) (map[string]interface{}, error) {
 	version, msgType, data, err := protocol.UnpackBinaryHeader(msgData)
 	if err != nil {
 		return nil, err
 	}
 
-	_ = version // 暂时不使用版本号
+	_ = version // Version not used for now
 
-	// 客户端和网关处理不同的消息类型
+	// Client and gateway handle different message types
 	if h.isClient {
 		return h.parseClientMessage(msgType, data)
 	}
 	return h.parseGatewayMessage(msgType, data)
 }
 
-// parseClientMessage 解析客户端接收的消息
+// parseClientMessage parses messages received by client
 func (h *BinaryMessageHandler) parseClientMessage(msgType byte, data []byte) (map[string]interface{}, error) {
 	switch msgType {
 	case protocol.BinaryMsgTypeData:
-		// 数据消息
+		// Data message
 		connID, payload, err := protocol.UnpackDataMessage(data)
 		if err != nil {
 			return nil, err
 		}
 
-		// 更新接收字节数
+		// Update received bytes count
 		monitoring.AddBytesReceived(int64(len(payload)))
 
 		return map[string]interface{}{
 			"type":       protocol.MsgTypeData,
 			"id":         connID,
-			"data":       payload, // 直接使用原始数据
+			"data":       payload, // Use raw data directly
 			"_optimized": true,
 		}, nil
 
 	case protocol.BinaryMsgTypeConnect:
-		// 连接请求
+		// Connection request
 		connID, network, address, err := protocol.UnpackConnectMessage(data)
 		if err != nil {
 			return nil, err
@@ -116,7 +121,7 @@ func (h *BinaryMessageHandler) parseClientMessage(msgType byte, data []byte) (ma
 		}, nil
 
 	case protocol.BinaryMsgTypeClose:
-		// 关闭消息
+		// Close message
 		connID, err := protocol.UnpackCloseMessage(data)
 		if err != nil {
 			return nil, err
@@ -128,13 +133,13 @@ func (h *BinaryMessageHandler) parseClientMessage(msgType byte, data []byte) (ma
 		}, nil
 
 	case protocol.BinaryMsgTypePortForwardResp:
-		// 端口转发响应
+		// Port forward response
 		success, errorMsg, statuses, err := protocol.UnpackPortForwardResponseMessage(data)
 		if err != nil {
 			return nil, err
 		}
 
-		// 转换状态列表为兼容格式
+		// Convert status list to compatible format
 		var statusMap = make(map[int]bool)
 		for _, status := range statuses {
 			statusMap[status.Port] = status.Success
@@ -152,28 +157,28 @@ func (h *BinaryMessageHandler) parseClientMessage(msgType byte, data []byte) (ma
 	}
 }
 
-// parseGatewayMessage 解析网关接收的消息
+// parseGatewayMessage parses messages received by gateway
 func (h *BinaryMessageHandler) parseGatewayMessage(msgType byte, data []byte) (map[string]interface{}, error) {
 	switch msgType {
 	case protocol.BinaryMsgTypeData:
-		// 数据消息
+		// Data message
 		connID, payload, err := protocol.UnpackDataMessage(data)
 		if err != nil {
 			return nil, err
 		}
 
-		// 更新接收字节数
+		// Update received bytes count
 		monitoring.AddBytesReceived(int64(len(payload)))
 
 		return map[string]interface{}{
 			"type":       protocol.MsgTypeData,
 			"id":         connID,
-			"data":       payload, // 直接使用原始数据
+			"data":       payload, // Use raw data directly
 			"_optimized": true,
 		}, nil
 
 	case protocol.BinaryMsgTypeConnectResponse:
-		// 连接响应
+		// Connection response
 		connID, success, errorMsg, err := protocol.UnpackConnectResponseMessage(data)
 		if err != nil {
 			return nil, err
@@ -187,7 +192,7 @@ func (h *BinaryMessageHandler) parseGatewayMessage(msgType byte, data []byte) (m
 		}, nil
 
 	case protocol.BinaryMsgTypeClose:
-		// 关闭消息
+		// Close message
 		connID, err := protocol.UnpackCloseMessage(data)
 		if err != nil {
 			return nil, err
@@ -199,13 +204,13 @@ func (h *BinaryMessageHandler) parseGatewayMessage(msgType byte, data []byte) (m
 		}, nil
 
 	case protocol.BinaryMsgTypePortForward:
-		// 端口转发请求
+		// Port forward request
 		clientID, ports, err := protocol.UnpackPortForwardMessage(data)
 		if err != nil {
 			return nil, err
 		}
 
-		// 转换为兼容格式
+		// Convert to compatible format
 		openPorts := make([]interface{}, len(ports))
 		for i, port := range ports {
 			openPorts[i] = map[string]interface{}{
@@ -227,41 +232,41 @@ func (h *BinaryMessageHandler) parseGatewayMessage(msgType byte, data []byte) (m
 	}
 }
 
-// WriteDataMessage 发送数据消息，使用二进制格式
+// WriteDataMessage sends data message using binary format
 func (h *BinaryMessageHandler) WriteDataMessage(connID string, data []byte) error {
-	// 使用二进制格式
+	// Use binary format
 	binaryMsg := protocol.PackDataMessage(connID, data)
 
-	// 更新发送的字节数
+	// Update sent bytes count
 	monitoring.AddBytesSent(int64(len(data)))
 
 	return h.conn.WriteMessage(binaryMsg)
 }
 
-// WriteCloseMessage 发送关闭消息，使用二进制格式
+// WriteCloseMessage sends close message using binary format
 func (h *BinaryMessageHandler) WriteCloseMessage(connID string) error {
-	// 使用二进制格式
+	// Use binary format
 	binaryMsg := protocol.PackCloseMessage(connID)
 
 	return h.conn.WriteMessage(binaryMsg)
 }
 
-// ExtendedMessageHandler 扩展的消息处理器接口（用于特定端的额外功能）
+// ExtendedMessageHandler extended message handler interface (for endpoint-specific additional functionality)
 type ExtendedMessageHandler interface {
-	MessageHandler
-	// 客户端特有的方法
+	Handler
+	// Client-specific methods
 	WriteConnectResponse(connID string, success bool, errorMsg string) error
-	// 网关特有的方法
+	// Gateway-specific methods
 	WriteConnectMessage(connID, network, address string) error
 }
 
-// ExtendedBinaryMessageHandler 扩展的二进制消息处理器
+// ExtendedBinaryMessageHandler extended binary message handler
 type ExtendedBinaryMessageHandler struct {
 	*BinaryMessageHandler
 }
 
-// NewClientExtendedMessageHandler 创建客户端扩展消息处理器
-func NewClientExtendedMessageHandler(conn MessageConnection) ExtendedMessageHandler {
+// NewClientExtendedMessageHandler creates client extended message handler
+func NewClientExtendedMessageHandler(conn Connection) ExtendedMessageHandler {
 	return &ExtendedBinaryMessageHandler{
 		BinaryMessageHandler: &BinaryMessageHandler{
 			conn:     conn,
@@ -270,8 +275,8 @@ func NewClientExtendedMessageHandler(conn MessageConnection) ExtendedMessageHand
 	}
 }
 
-// NewGatewayExtendedMessageHandler 创建网关扩展消息处理器
-func NewGatewayExtendedMessageHandler(conn MessageConnection) ExtendedMessageHandler {
+// NewGatewayExtendedMessageHandler creates gateway extended message handler
+func NewGatewayExtendedMessageHandler(conn Connection) ExtendedMessageHandler {
 	return &ExtendedBinaryMessageHandler{
 		BinaryMessageHandler: &BinaryMessageHandler{
 			conn:     conn,
@@ -280,17 +285,17 @@ func NewGatewayExtendedMessageHandler(conn MessageConnection) ExtendedMessageHan
 	}
 }
 
-// WriteConnectResponse 发送连接响应，使用二进制格式（客户端使用）
+// WriteConnectResponse sends connection response using binary format (used by client)
 func (h *ExtendedBinaryMessageHandler) WriteConnectResponse(connID string, success bool, errorMsg string) error {
-	// 使用二进制格式
+	// Use binary format
 	binaryMsg := protocol.PackConnectResponseMessage(connID, success, errorMsg)
 
 	return h.conn.WriteMessage(binaryMsg)
 }
 
-// WriteConnectMessage 发送连接请求，使用二进制格式（网关使用）
+// WriteConnectMessage sends connection request using binary format (used by gateway)
 func (h *ExtendedBinaryMessageHandler) WriteConnectMessage(connID, network, address string) error {
-	// 使用二进制格式
+	// Use binary format
 	binaryMsg := protocol.PackConnectMessage(connID, network, address)
 
 	return h.conn.WriteMessage(binaryMsg)

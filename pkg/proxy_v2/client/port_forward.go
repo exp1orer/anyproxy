@@ -5,7 +5,7 @@ import (
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/protocol"
 )
 
-// sendPortForwardingRequest 发送端口转发请求 (与 v1 相同)
+// sendPortForwardingRequest sends port forwarding request (same as v1)
 func (c *Client) sendPortForwardingRequest() error {
 	if len(c.config.OpenPorts) == 0 {
 		return nil
@@ -13,7 +13,7 @@ func (c *Client) sendPortForwardingRequest() error {
 
 	logger.Debug("Preparing port forwarding request", "client_id", c.getClientID(), "port_count", len(c.config.OpenPorts))
 
-	// 构建端口配置列表
+	// Build port configuration list
 	ports := make([]protocol.PortConfig, 0, len(c.config.OpenPorts))
 	for _, port := range c.config.OpenPorts {
 		ports = append(ports, protocol.PortConfig{
@@ -24,12 +24,12 @@ func (c *Client) sendPortForwardingRequest() error {
 		})
 	}
 
-	// 使用二进制格式发送端口转发请求
+	// Send port forwarding request using binary format
 	binaryMsg := protocol.PackPortForwardMessage(c.getClientID(), ports)
 	return c.conn.WriteMessage(binaryMsg)
 }
 
-// handlePortForwardResponse 处理端口转发响应 (与 v1 相同)
+// handlePortForwardResponse handles port forwarding response (same as v1)
 func (c *Client) handlePortForwardResponse(msg map[string]interface{}) {
 	success, ok := msg["success"].(bool)
 	if !ok {
@@ -44,7 +44,7 @@ func (c *Client) handlePortForwardResponse(msg map[string]interface{}) {
 		logger.Error("Port forwarding setup failed", "client_id", c.getClientID(), "error", errorMsg)
 	}
 
-	// 记录具体的端口状态（如果有的话）
+	// Log specific port statuses (if available)
 	if portStatuses, ok := msg["port_statuses"].([]interface{}); ok {
 		for _, status := range portStatuses {
 			if statusMap, ok := status.(map[string]interface{}); ok {

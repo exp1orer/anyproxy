@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"strings"
 
 	"github.com/things-go/go-socks5"
 
@@ -153,7 +154,12 @@ func (s *socks5Proxy) Start() error {
 	// Start SOCKS5 server in a separate goroutine
 	go func() {
 		if err := s.server.Serve(listener); err != nil {
-			logger.Error("SOCKS5 server error", "addr", s.listenAddr, "err", err)
+			// Check if the error is due to listener being closed (normal shutdown)
+			if strings.Contains(err.Error(), "use of closed network connection") {
+				logger.Info("SOCKS5 server stopped", "addr", s.listenAddr)
+			} else {
+				logger.Error("SOCKS5 server error", "addr", s.listenAddr, "err", err)
+			}
 		}
 	}()
 
@@ -168,8 +174,13 @@ func (s *socks5Proxy) Stop() error {
 	if s.listener != nil {
 		err := s.listener.Close()
 		if err != nil {
-			logger.Error("Error closing listener", "addr", s.listenAddr, "err", err)
-			return err
+			// Check if the error is due to listener being closed (normal shutdown)
+			if strings.Contains(err.Error(), "use of closed network connection") {
+				logger.Debug("Listener close error (expected during shutdown)", "addr", s.listenAddr, "err", err)
+			} else {
+				logger.Error("Error closing listener", "addr", s.listenAddr, "err", err)
+				return err
+			}
 		}
 		logger.Info("SOCKS5 proxy stopped", "addr", s.listenAddr)
 		return nil

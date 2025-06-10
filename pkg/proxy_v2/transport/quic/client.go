@@ -60,7 +60,7 @@ func (t *quicTransport) dialQUICWithConfig(addr string, config *transport.Client
 	if err != nil {
 		logger.Error("Failed to open QUIC stream", "client_id", config.ClientID, "err", err)
 		if closeErr := conn.CloseWithError(0, "failed to open stream"); closeErr != nil {
-			logger.Debug("Error closing QUIC connection after stream failure", "err", closeErr)
+			logger.Warn("Error closing QUIC connection after stream failure", "err", closeErr)
 		}
 		return nil, fmt.Errorf("failed to open stream: %v", err)
 	}
@@ -70,7 +70,7 @@ func (t *quicTransport) dialQUICWithConfig(addr string, config *transport.Client
 	// 🚨 Fix: Send authentication message and wait for response
 	if err := t.authenticateClient(stream, config); err != nil {
 		if closeErr := conn.CloseWithError(1, "authentication failed"); closeErr != nil {
-			logger.Debug("Error closing QUIC connection after auth failure", "err", closeErr)
+			logger.Warn("Error closing QUIC connection after auth failure", "err", closeErr)
 		}
 		return nil, fmt.Errorf("authentication failed: %v", err)
 	}
@@ -103,7 +103,7 @@ func (t *quicTransport) authenticateClient(stream quic.Stream, config *transport
 		isClient:  true,
 	}
 
-	// 🆕 确保临时 channels 被关闭
+	// 🆕 Ensure temporary channels are closed
 	defer func() {
 		close(tempConn.readChan)
 		close(tempConn.errorChan)
@@ -156,7 +156,7 @@ func (t *quicTransport) authenticateClient(stream quic.Stream, config *transport
 		return fmt.Errorf("failed to unpack auth response: %v", err)
 	}
 
-	_ = version // 暂时不使用版本号
+	_ = version // Version not used for now
 
 	if msgType != protocol.BinaryMsgTypeAuthResponse {
 		return fmt.Errorf("unexpected message type: 0x%02x", msgType)

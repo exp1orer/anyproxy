@@ -16,7 +16,7 @@ import (
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/transport"
 )
 
-// connectionLoop handles connection and reconnection logic (与 v1 相同，但使用传输层)
+// connectionLoop handles connection and reconnection logic (same as v1, but using transport layer)
 func (c *Client) connectionLoop() {
 	logger.Debug("Starting connection loop", "client_id", c.getClientID())
 
@@ -35,16 +35,16 @@ func (c *Client) connectionLoop() {
 		connectionAttempts++
 		logger.Debug("Attempting to connect to gateway", "client_id", c.getClientID(), "attempt", connectionAttempts, "gateway_addr", c.config.GatewayAddr)
 
-		// 尝试连接 (🆕 使用传输层抽象)
+		// Attempt to connect (🆕 using transport layer abstraction)
 		if err := c.connect(); err != nil {
 			logger.Error("Failed to connect to gateway", "client_id", c.getClientID(), "attempt", connectionAttempts, "err", err, "retrying_in", backoff)
 
-			// 添加抖动避免雷鸣群问题
-			// 使用 math/rand 是有意为之，这里不需要加密安全的随机数
+			// Add jitter to avoid thundering herd problem
+			// Using math/rand is intentional, we don't need cryptographically secure random numbers here
 			jitter := time.Duration(rand.Int63n(int64(backoff) / 4)) //nolint:gosec // jitter doesn't require crypto rand
 			sleepTime := backoff + jitter
 
-			// 等待重试 (与 v1 相同)
+			// Wait for retry (same as v1)
 			select {
 			case <-c.ctx.Done():
 				logger.Debug("Connection retry cancelled due to context", "client_id", c.getClientID())
@@ -52,7 +52,7 @@ func (c *Client) connectionLoop() {
 			case <-time.After(sleepTime):
 			}
 
-			// 指数退避 (与 v1 相同)
+			// Exponential backoff (same as v1)
 			backoff *= 2
 			if backoff > maxBackoff {
 				backoff = maxBackoff
@@ -60,14 +60,14 @@ func (c *Client) connectionLoop() {
 			continue
 		}
 
-		// 重置退避 (与 v1 相同)
+		// Reset backoff (same as v1)
 		backoff = 1 * time.Second
 		logger.Info("Successfully connected to gateway", "client_id", c.getClientID(), "attempt", connectionAttempts, "gateway_addr", c.config.GatewayAddr)
 
-		// 处理消息 (与 v1 相同)
+		// Handle messages (same as v1)
 		c.handleMessages()
 
-		// 检查是否停止 (与 v1 相同)
+		// Check if stopping (same as v1)
 		select {
 		case <-c.ctx.Done():
 			logger.Debug("Connection loop ending due to context cancellation", "client_id", c.getClientID())
@@ -75,19 +75,19 @@ func (c *Client) connectionLoop() {
 		default:
 		}
 
-		// 连接丢失，清理并重试 (与 v1 相同)
+		// Connection lost, clean up and retry (same as v1)
 		logger.Info("Connection to gateway lost, cleaning up and retrying...", "client_id", c.getClientID(), "total_attempts", connectionAttempts)
 		c.cleanup()
 	}
 }
 
-// connect establishes a connection to the gateway (🆕 使用传输层抽象，但逻辑与 v1 相同)
+// connect establishes a connection to the gateway (🆕 using transport layer abstraction, but logic same as v1)
 func (c *Client) connect() error {
 	logger.Debug("Establishing connection to gateway", "client_id", c.getClientID(), "gateway_addr", c.config.GatewayAddr)
 
 	c.actualID = c.generateClientID()
 
-	// 🆕 创建 TLS 配置 (从 v1 迁移)
+	// 🆕 Create TLS configuration (migrated from v1)
 	var tlsConfig *tls.Config
 	if c.config.GatewayTLSCert != "" || strings.HasPrefix(c.config.GatewayAddr, "wss://") {
 		logger.Debug("Creating TLS configuration", "client_id", c.actualID)
@@ -100,20 +100,20 @@ func (c *Client) connect() error {
 		logger.Debug("TLS configuration created successfully", "client_id", c.actualID)
 	}
 
-	// 🆕 创建传输层客户端配置
+	// 🆕 Create transport layer client configuration
 	transportConfig := &transport.ClientConfig{
 		ClientID:   c.actualID,
 		GroupID:    c.config.GroupID,
 		Username:   c.config.AuthUsername,
 		Password:   c.config.AuthPassword,
 		TLSCert:    c.config.GatewayTLSCert,
-		TLSConfig:  tlsConfig, // 🆕 传递 TLS 配置
-		SkipVerify: false,     // 根据需要配置
+		TLSConfig:  tlsConfig, // 🆕 Pass TLS configuration
+		SkipVerify: false,     // Configure as needed
 	}
 
 	logger.Debug("Transport configuration created", "client_id", c.actualID, "group_id", c.config.GroupID, "auth_enabled", c.config.AuthUsername != "", "tls_enabled", tlsConfig != nil)
 
-	// 🆕 使用传输层进行连接
+	// 🆕 Connect using transport layer
 	conn, err := c.transport.DialWithConfig(c.config.GatewayAddr, transportConfig)
 	if err != nil {
 		logger.Error("Failed to connect via transport layer", "client_id", c.actualID, "gateway_addr", c.config.GatewayAddr, "err", err)
@@ -123,15 +123,15 @@ func (c *Client) connect() error {
 	c.conn = conn
 	logger.Info("Transport connection established successfully", "client_id", c.actualID, "group_id", c.config.GroupID, "remote_addr", conn.RemoteAddr())
 
-	// 🆕 初始化消息处理器
+	// 🆕 Initialize message handler
 	c.msgHandler = message.NewClientExtendedMessageHandler(conn)
 
-	// 发送端口转发请求 (与 v1 相同)
+	// Send port forwarding request (same as v1)
 	if len(c.config.OpenPorts) > 0 {
 		logger.Debug("Sending port forwarding request", "client_id", c.actualID, "port_count", len(c.config.OpenPorts))
 		if err := c.sendPortForwardingRequest(); err != nil {
 			logger.Error("Failed to send port forwarding request", "client_id", c.actualID, "err", err)
-			// 继续执行，端口转发是可选的
+			// Continue execution, port forwarding is optional
 		}
 	} else {
 		logger.Debug("No port forwarding configured", "client_id", c.actualID)
@@ -140,23 +140,23 @@ func (c *Client) connect() error {
 	return nil
 }
 
-// cleanup cleans up resources after connection loss (与 v1 相同逻辑，使用传输层)
+// cleanup cleans up resources after connection loss (same logic as v1, using transport layer)
 func (c *Client) cleanup() {
 	logger.Debug("Starting cleanup after connection loss", "client_id", c.getClientID())
 
-	// 🆕 停止传输层连接
+	// 🆕 Stop transport layer connection
 	if c.conn != nil {
 		logger.Debug("Stopping transport connection during cleanup", "client_id", c.getClientID())
 		if err := c.conn.Close(); err != nil {
-			logger.Debug("Error closing client connection during stop", "err", err)
+			logger.Debug("Error closing client connection during stop (expected)", "err", err)
 		}
 		logger.Debug("Transport connection stopped", "client_id", c.getClientID())
 	}
 
-	// 获取连接数量 (使用 ConnectionManager)
+	// Get connection count (using ConnectionManager)
 	connectionCount := c.connMgr.GetConnectionCount()
 
-	// 关闭所有连接 (使用 ConnectionManager)
+	// Close all connections (using ConnectionManager)
 	if connectionCount > 0 {
 		logger.Debug("Closing connections during cleanup", "client_id", c.getClientID(), "connection_count", connectionCount)
 		c.connMgr.CloseAllConnections()
@@ -166,24 +166,18 @@ func (c *Client) cleanup() {
 	logger.Debug("Cleanup completed", "client_id", c.getClientID(), "connections_closed", connectionCount)
 }
 
-// closeAllConnections closes all active connections (与 v1 相同)
-func (c *Client) closeAllConnections() {
-	c.connMgr.CloseAllConnections()
-	c.connMgr.CloseAllMessageChannels()
-}
-
-// handleConnection 处理单个客户端连接的数据传输 (与 v1 相同)
+// handleConnection handles data transfer for a single client connection (same as v1)
 func (c *Client) handleConnection(connID string) {
 	logger.Debug("Starting connection handler", "client_id", c.getClientID(), "conn_id", connID)
 
-	// 获取连接 (使用 ConnectionManager)
+	// Get connection (using ConnectionManager)
 	conn, exists := c.connMgr.GetConnection(connID)
 	if !exists {
 		logger.Error("Connection not found in connection handler", "client_id", c.getClientID(), "conn_id", connID)
 		return
 	}
 
-	// 使用缓冲区读取数据，提高性能 (与 v1 相同)
+	// Use buffered reading for better performance (same as v1)
 	buffer := make([]byte, protocol.DefaultBufferSize)
 	totalBytes := 0
 	readCount := 0
@@ -196,26 +190,26 @@ func (c *Client) handleConnection(connID string) {
 		default:
 		}
 
-		// 设置读取超时，带上下文感知 (与 v1 相同)
+		// Set read timeout with context awareness (same as v1)
 		deadline := time.Now().Add(protocol.DefaultReadTimeout)
 		if ctxDeadline, ok := c.ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
 			deadline = ctxDeadline
 		}
 		if err := conn.SetReadDeadline(deadline); err != nil {
-			logger.Debug("Failed to set read deadline", "client_id", c.getClientID(), "conn_id", connID, "err", err)
+			logger.Warn("Failed to set read deadline", "client_id", c.getClientID(), "conn_id", connID, "err", err)
 		}
 
-		// 从本地连接读取数据 (与 v1 相同)
+		// Read data from local connection (same as v1)
 		n, err := conn.Read(buffer)
 		readCount++
 
 		if err != nil {
 			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				// 读取超时，继续 (与 v1 相同)
+				// Read timeout, continue (same as v1)
 				continue
 			}
 
-			// 优雅地记录连接关闭 (与 v1 相同)
+			// Gracefully log connection close (same as v1)
 			if strings.Contains(err.Error(), "use of closed network connection") ||
 				strings.Contains(err.Error(), "connection reset by peer") ||
 				err == io.EOF {
@@ -224,10 +218,12 @@ func (c *Client) handleConnection(connID string) {
 				logger.Error("Error reading from local connection", "client_id", c.getClientID(), "conn_id", connID, "err", err, "total_bytes", totalBytes)
 			}
 
-			// 发送关闭消息到网关 (与 v1 相同)
-			c.writeCloseMessage(connID)
+			// Send close message to gateway (same as v1)
+			if err := c.writeCloseMessage(connID); err != nil {
+				logger.Warn("Failed to send close message to gateway", "client_id", c.getClientID(), "conn_id", connID, "err", err)
+			}
 
-			// 清理连接 (使用 ConnectionManager)
+			// Clean up connection (using ConnectionManager)
 			c.cleanupConnection(connID)
 			return
 		}
@@ -235,12 +231,12 @@ func (c *Client) handleConnection(connID string) {
 		if n > 0 {
 			totalBytes += n
 
-			// 采样日志，减少日志量
+			// Sample logs to reduce log volume
 			if monitoring.ShouldLogData() && n > 1000 {
 				logger.Debug("Read data from local connection", "client_id", c.getClientID(), "conn_id", connID, "bytes", n, "total_bytes", totalBytes)
 			}
 
-			// 🆕 发送数据到网关（使用二进制协议）
+			// 🆕 Send data to gateway (using binary protocol)
 			if err := c.writeDataMessage(connID, buffer[:n]); err != nil {
 				logger.Error("Failed to send data to gateway", "client_id", c.getClientID(), "conn_id", connID, "bytes", n, "err", err)
 				c.cleanupConnection(connID)
@@ -250,11 +246,11 @@ func (c *Client) handleConnection(connID string) {
 	}
 }
 
-// cleanupConnection 清理连接并发送关闭消息 (使用 ConnectionManager)
+// cleanupConnection cleans up connection and sends close message (using ConnectionManager)
 func (c *Client) cleanupConnection(connID string) {
 	logger.Debug("Cleaning up connection", "client_id", c.getClientID(), "conn_id", connID)
 
-	// 使用 ConnectionManager 清理连接
+	// Use ConnectionManager to clean up connection
 	c.connMgr.CleanupConnection(connID)
 
 	logger.Debug("Connection cleaned up", "client_id", c.getClientID(), "conn_id", connID)
