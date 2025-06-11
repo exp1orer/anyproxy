@@ -16,12 +16,23 @@ import (
 	"github.com/buhuipao/anyproxy/pkg/proxy_v2/common/utils"
 )
 
+// PortKey represents a port with protocol information for unique identification
+type PortKey struct {
+	Port     int
+	Protocol string
+}
+
+// String returns a string representation of the PortKey
+func (pk PortKey) String() string {
+	return fmt.Sprintf("%s:%d", pk.Protocol, pk.Port)
+}
+
 // PortForwardManager port forwarding manager (complete migration from v1)
 type PortForwardManager struct {
-	// Map of client ID to their forwarded ports
-	clientPorts map[string]map[int]*PortListener
-	// Map of port to client ID (for conflict detection)
-	portOwners map[int]string
+	// Map of client ID to their forwarded ports (port -> PortListener)
+	clientPorts map[string]map[PortKey]*PortListener
+	// Map of (port, protocol) to client ID (for conflict detection)
+	portOwners map[PortKey]string
 	mutex      sync.RWMutex
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -48,8 +59,8 @@ func NewPortForwardManager() *PortForwardManager {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	manager := &PortForwardManager{
-		clientPorts: make(map[string]map[int]*PortListener),
-		portOwners:  make(map[int]string),
+		clientPorts: make(map[string]map[PortKey]*PortListener),
+		portOwners:  make(map[PortKey]string),
 		ctx:         ctx,
 		cancel:      cancel,
 	}
@@ -81,14 +92,14 @@ func (pm *PortForwardManager) OpenPorts(client *ClientConn, openPorts []config.O
 
 	// Initialize client ports map if it doesn't exist
 	if pm.clientPorts[client.ID] == nil {
-		pm.clientPorts[client.ID] = make(map[int]*PortListener)
+		pm.clientPorts[client.ID] = make(map[PortKey]*PortListener)
 		logger.Debug("Initialized port map for new client", "client_id", client.ID)
 	}
 
 	var errors []error
 	successfulPorts := []*PortListener{}
-	conflictPorts := []int{}
-	duplicatePorts := []int{}
+	conflictPorts := []PortKey{}
+	duplicatePorts := []PortKey{}
 
 	// Log details of each port request
 	for i, openPort := range openPorts {
@@ -96,33 +107,39 @@ func (pm *PortForwardManager) OpenPorts(client *ClientConn, openPorts []config.O
 	}
 
 	for _, openPort := range openPorts {
-		// Check if port is already in use
-		if existingClientID, exists := pm.portOwners[openPort.RemotePort]; exists {
+		// Create port key with protocol information
+		portKey := PortKey{
+			Port:     openPort.RemotePort,
+			Protocol: openPort.Protocol,
+		}
+
+		// Check if port+protocol combination is already in use
+		if existingClientID, exists := pm.portOwners[portKey]; exists {
 			if existingClientID != client.ID {
-				conflictPorts = append(conflictPorts, openPort.RemotePort)
-				logger.Warn("Port conflict detected", "client_id", client.ID, "port", openPort.RemotePort, "existing_owner", existingClientID)
-				errors = append(errors, fmt.Errorf("port %d already in use by client %s", openPort.RemotePort, existingClientID))
+				conflictPorts = append(conflictPorts, portKey)
+				logger.Warn("Port conflict detected", "client_id", client.ID, "port_key", portKey.String(), "existing_owner", existingClientID)
+				errors = append(errors, fmt.Errorf("port %d (%s) already in use by client %s", openPort.RemotePort, openPort.Protocol, existingClientID))
 				continue
 			}
-			// Same client requesting same port - skip
-			duplicatePorts = append(duplicatePorts, openPort.RemotePort)
-			logger.Info("Port already opened by same client", "port", openPort.RemotePort, "client_id", client.ID)
+			// Same client requesting same port+protocol combination - skip
+			duplicatePorts = append(duplicatePorts, portKey)
+			logger.Info("Port already opened by same client", "port_key", portKey.String(), "client_id", client.ID)
 			continue
 		}
 
 		// Create port listener
-		logger.Debug("Creating port listener", "client_id", client.ID, "port", openPort.RemotePort, "protocol", openPort.Protocol)
+		logger.Debug("Creating port listener", "client_id", client.ID, "port_key", portKey.String())
 
 		portListener, err := pm.createPortListener(client, openPort)
 		if err != nil {
-			logger.Error("Failed to create port listener", "client_id", client.ID, "port", openPort.RemotePort, "protocol", openPort.Protocol, "err", err)
-			errors = append(errors, fmt.Errorf("failed to open port %d: %v", openPort.RemotePort, err))
+			logger.Error("Failed to create port listener", "client_id", client.ID, "port_key", portKey.String(), "err", err)
+			errors = append(errors, fmt.Errorf("failed to open port %d (%s): %v", openPort.RemotePort, openPort.Protocol, err))
 			continue
 		}
 
-		// Register the port
-		pm.clientPorts[client.ID][openPort.RemotePort] = portListener
-		pm.portOwners[openPort.RemotePort] = client.ID
+		// Register the port with protocol information
+		pm.clientPorts[client.ID][portKey] = portListener
+		pm.portOwners[portKey] = client.ID
 		successfulPorts = append(successfulPorts, portListener)
 
 		logger.Info("Port forwarding created successfully", "client_id", client.ID, "remote_port", openPort.RemotePort, "local_host", openPort.LocalHost, "local_port", openPort.LocalPort, "protocol", openPort.Protocol)
@@ -132,7 +149,7 @@ func (pm *PortForwardManager) OpenPorts(client *ClientConn, openPorts []config.O
 	logger.Debug("Starting listeners for successful ports", "client_id", client.ID, "successful_count", len(successfulPorts))
 
 	for i, portListener := range successfulPorts {
-		logger.Debug("Starting port listener", "client_id", client.ID, "port", portListener.Port, "listener_index", i)
+		logger.Debug("Starting port listener", "client_id", client.ID, "port", portListener.Port, "protocol", portListener.Protocol, "listener_index", i)
 
 		pm.wg.Add(1)
 		go func(pl *PortListener) {
@@ -574,14 +591,14 @@ func (pm *PortForwardManager) CloseClientPorts(clientID string) {
 	logger.Info("Closing all ports for client", "client_id", clientID, "port_count", len(clientPortMap))
 
 	// Close all port listeners for this client
-	for port, portListener := range clientPortMap {
+	for portKey, portListener := range clientPortMap {
 		// Remove from port owners
-		delete(pm.portOwners, port)
+		delete(pm.portOwners, portKey)
 
 		// Cancel the port listener context - this will gracefully stop all operations
 		portListener.cancel()
 
-		logger.Info("Closed port forwarding", "client_id", clientID, "port", port)
+		logger.Info("Closed port forwarding", "client_id", clientID, "port_key", portKey.String())
 	}
 
 	// Remove the client from clientPorts
@@ -619,15 +636,15 @@ func (pm *PortForwardManager) Stop() {
 
 	// Clear all data structures
 	pm.mutex.Lock()
-	pm.clientPorts = make(map[string]map[int]*PortListener)
-	pm.portOwners = make(map[int]string)
+	pm.clientPorts = make(map[string]map[PortKey]*PortListener)
+	pm.portOwners = make(map[PortKey]string)
 	pm.mutex.Unlock()
 
 	logger.Info("Port forwarding manager stopped", "ports_closed", totalPorts, "clients_affected", totalClients)
 }
 
 // GetClientPorts gets client port list (complete migration from v1)
-func (pm *PortForwardManager) GetClientPorts(clientID string) []int {
+func (pm *PortForwardManager) GetClientPorts(clientID string) []PortKey {
 	pm.mutex.RLock()
 	defer pm.mutex.RUnlock()
 
@@ -637,9 +654,9 @@ func (pm *PortForwardManager) GetClientPorts(clientID string) []int {
 		return nil
 	}
 
-	ports := make([]int, 0, len(clientPortMap))
-	for port := range clientPortMap {
-		ports = append(ports, port)
+	ports := make([]PortKey, 0, len(clientPortMap))
+	for portKey := range clientPortMap {
+		ports = append(ports, portKey)
 	}
 
 	logger.Debug("Retrieved client ports", "client_id", clientID, "port_count", len(ports), "ports", ports)
