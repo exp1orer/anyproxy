@@ -1,5 +1,5 @@
 // Package main implements the AnyProxy gateway server application.
-// This is the v1 gateway that accepts client connections and handles proxy traffic.
+// This gateway supports multi-transport protocols (WebSocket, gRPC, QUIC).
 package main
 
 import (
@@ -9,8 +9,8 @@ import (
 	"syscall"
 
 	"github.com/buhuipao/anyproxy/pkg/config"
+	"github.com/buhuipao/anyproxy/pkg/gateway"
 	"github.com/buhuipao/anyproxy/pkg/logger"
-	"github.com/buhuipao/anyproxy/pkg/proxy"
 )
 
 func main() {
@@ -31,8 +31,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Create and start gateway
-	gateway, err := proxy.NewGateway(cfg)
+	// Create and start gateway (using WebSocket transport layer)
+	gw, err := gateway.NewGateway(cfg, cfg.Transport.Type)
 	if err != nil {
 		logger.Error("Failed to create gateway", "err", err)
 		os.Exit(1)
@@ -44,7 +44,7 @@ func main() {
 
 	// Start gateway in a separate goroutine
 	go func() {
-		if err := gateway.Start(); err != nil {
+		if err := gw.Start(); err != nil {
 			logger.Error("Gateway failed", "err", err)
 			os.Exit(1)
 		}
@@ -57,7 +57,7 @@ func main() {
 	logger.Info("Shutting down...")
 
 	// Stop gateway
-	if err := gateway.Stop(); err != nil {
+	if err := gw.Stop(); err != nil {
 		logger.Error("Error shutting down gateway", "err", err)
 	}
 

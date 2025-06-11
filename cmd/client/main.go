@@ -1,5 +1,5 @@
 // Package main implements the AnyProxy client application.
-// This is the v1 client that connects to the gateway and handles proxy requests.
+// This client supports multi-transport protocols (WebSocket, gRPC, QUIC).
 package main
 
 import (
@@ -9,9 +9,9 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/buhuipao/anyproxy/pkg/client"
 	"github.com/buhuipao/anyproxy/pkg/config"
 	"github.com/buhuipao/anyproxy/pkg/logger"
-	"github.com/buhuipao/anyproxy/pkg/proxy"
 )
 
 func main() {
@@ -32,22 +32,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	var clients []*proxy.Client
+	var clients []*client.Client
 	for i := 0; i < cfg.Client.Replicas; i++ {
-		// Create and start client
-		client, err := proxy.NewClient(&cfg.Client)
+		// Create and start client (using WebSocket transport layer)
+		// Fix: Pass replica index i to ensure each client has unique ID
+		proxyClient, err := client.NewClient(&cfg.Client, cfg.Transport.Type, i)
 		if err != nil {
-			logger.Error("Failed to create client", "err", err)
+			logger.Error("Failed to create client", "replica_idx", i, "err", err)
 			os.Exit(1)
 		}
 
 		// Start client (non-blocking)
-		if err := client.Start(); err != nil {
+		if err := proxyClient.Start(); err != nil {
 			logger.Error("Failed to start client", "err", err)
 			os.Exit(1)
 		}
 
-		clients = append(clients, client)
+		clients = append(clients, proxyClient)
 	}
 	logger.Info("Started clients", "count", cfg.Client.Replicas, "gateway_addr", cfg.Client.GatewayAddr)
 
@@ -61,14 +62,14 @@ func main() {
 
 	// Stop all clients concurrently
 	var stopWg sync.WaitGroup
-	for _, client := range clients {
+	for _, proxyClient := range clients {
 		stopWg.Add(1)
-		go func(c *proxy.Client) {
+		go func(c *client.Client) {
 			defer stopWg.Done()
 			if err := c.Stop(); err != nil {
 				logger.Error("Error shutting down client", "err", err)
 			}
-		}(client)
+		}(proxyClient)
 	}
 
 	// Wait for all clients to stop

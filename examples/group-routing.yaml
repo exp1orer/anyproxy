@@ -1,4 +1,4 @@
-# AnyProxy v2 Group-Based Routing Configuration
+# AnyProxy Group-Based Routing Configuration
 # Route traffic to different client groups (prod/staging/dev)
 
 log:

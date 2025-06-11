@@ -1,6 +1,6 @@
-# AnyProxy v2 Configuration Examples
+# AnyProxy Configuration Examples
 
-This directory contains simplified, practical configuration examples for common AnyProxy v2 use cases.
+This directory contains simplified, practical configuration examples for common AnyProxy use cases.
 
 ## Available Examples
 

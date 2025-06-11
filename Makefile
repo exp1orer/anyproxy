@@ -11,9 +11,9 @@ GOOS ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
 CGO_ENABLED ?= 0
 
-# Binary names (v2 is the current version)
-GATEWAY_BINARY = anyproxy-gateway-v2
-CLIENT_BINARY = anyproxy-client-v2
+# Binary names
+GATEWAY_BINARY = anyproxy-gateway
+CLIENT_BINARY = anyproxy-client
 
 # Build directory
 BUILD_DIR = bin
@@ -36,10 +36,10 @@ help: ## Show this help message
 	@awk 'BEGIN {FS = " ## "} !/^(build|run-|test|lint|fmt|vet|deps|docker).*##/ && /.*##/ {gsub(/:.*/, "", $$1); printf "    %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 build: ## Build binaries for current platform
-	@echo "Building v2 binaries for $(GOOS)/$(GOARCH)..."
+	@echo "Building binaries for $(GOOS)/$(GOARCH)..."
 	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(GATEWAY_BINARY) cmd/v2/gateway/main.go
-	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(CLIENT_BINARY) cmd/v2/client/main.go
+	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(GATEWAY_BINARY) cmd/gateway/main.go
+	CGO_ENABLED=$(CGO_ENABLED) GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags="$(LDFLAGS)" -o $(BUILD_DIR)/$(CLIENT_BINARY) cmd/client/main.go
 	@echo "Build completed: $(BUILD_DIR)/$(GATEWAY_BINARY), $(BUILD_DIR)/$(CLIENT_BINARY)"
 
 build-all: ## Build binaries for all platforms
@@ -48,28 +48,28 @@ build-all: ## Build binaries for all platforms
 	
 	# Linux AMD64
 	@echo "Building for linux/amd64..."
-	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(GATEWAY_BINARY)-linux-amd64 cmd/v2/gateway/main.go
-	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(CLIENT_BINARY)-linux-amd64 cmd/v2/client/main.go
+	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(GATEWAY_BINARY)-linux-amd64 cmd/gateway/main.go
+	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(CLIENT_BINARY)-linux-amd64 cmd/client/main.go
 	
 	# Linux ARM64
 	@echo "Building for linux/arm64..."
-	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o build/$(GATEWAY_BINARY)-linux-arm64 cmd/v2/gateway/main.go
-	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o build/$(CLIENT_BINARY)-linux-arm64 cmd/v2/client/main.go
+	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o build/$(GATEWAY_BINARY)-linux-arm64 cmd/gateway/main.go
+	@CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o build/$(CLIENT_BINARY)-linux-arm64 cmd/client/main.go
 	
 	# Windows AMD64
 	@echo "Building for windows/amd64..."
-	@CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(GATEWAY_BINARY)-windows-amd64.exe cmd/v2/gateway/main.go
-	@CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(CLIENT_BINARY)-windows-amd64.exe cmd/v2/client/main.go
+	@CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(GATEWAY_BINARY)-windows-amd64.exe cmd/gateway/main.go
+	@CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(CLIENT_BINARY)-windows-amd64.exe cmd/client/main.go
 	
 	# macOS AMD64
 	@echo "Building for darwin/amd64..."
-	@CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(GATEWAY_BINARY)-darwin-amd64 cmd/v2/gateway/main.go
-	@CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(CLIENT_BINARY)-darwin-amd64 cmd/v2/client/main.go
+	@CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(GATEWAY_BINARY)-darwin-amd64 cmd/gateway/main.go
+	@CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="$(LDFLAGS)" -o build/$(CLIENT_BINARY)-darwin-amd64 cmd/client/main.go
 	
 	# macOS ARM64
 	@echo "Building for darwin/arm64..."
-	@CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o build/$(GATEWAY_BINARY)-darwin-arm64 cmd/v2/gateway/main.go
-	@CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o build/$(CLIENT_BINARY)-darwin-arm64 cmd/v2/client/main.go
+	@CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o build/$(GATEWAY_BINARY)-darwin-arm64 cmd/gateway/main.go
+	@CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="$(LDFLAGS)" -o build/$(CLIENT_BINARY)-darwin-arm64 cmd/client/main.go
 	
 	@echo "Cross-compilation completed. Binaries are in build/"
 

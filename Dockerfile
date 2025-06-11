@@ -22,20 +22,20 @@ RUN mkdir -p certs && \
     -days 365 -nodes -subj "/CN=localhost" \
     -addext "subjectAltName = DNS:localhost,DNS:anyproxy,IP:127.0.0.1,IP:0.0.0.0"
 
-# Build v2 binaries
+# Build binaries
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" \
-    -o anyproxy-gateway-v2 cmd/v2/gateway/main.go && \
+    -o anyproxy-gateway cmd/gateway/main.go && \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildTime=${BUILD_TIME}" \
-    -o anyproxy-client-v2 cmd/v2/client/main.go
+    -o anyproxy-client cmd/client/main.go
 
 # Verify binaries
-RUN chmod +x anyproxy-gateway-v2 anyproxy-client-v2
+RUN chmod +x anyproxy-gateway anyproxy-client
 
 # Runtime stage
 FROM alpine:latest
@@ -51,7 +51,7 @@ RUN addgroup -g 1001 anyproxy && \
 WORKDIR /app
 
 # Copy binaries from builder stage
-COPY --from=builder /app/anyproxy-gateway-v2 /app/anyproxy-client-v2 ./
+COPY --from=builder /app/anyproxy-gateway /app/anyproxy-client ./
 COPY --from=builder /app/certs ./certs/
 COPY --from=builder /app/configs ./configs/
 
@@ -67,7 +67,7 @@ EXPOSE 8080 1080 8443 9090 9091
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD pgrep anyproxy-gateway-v2 > /dev/null || exit 1
+    CMD pgrep anyproxy-gateway > /dev/null || exit 1
 
 # Default command (can be overridden)
-CMD ["./anyproxy-gateway-v2", "--config", "configs/config.yaml"] 
+CMD ["./anyproxy-gateway", "--config", "configs/config.yaml"] 

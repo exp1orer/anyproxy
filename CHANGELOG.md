@@ -14,39 +14,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configuration hot reload
 - Advanced load balancing algorithms
 
-## [v2.0.0] - 2025-01-XX
+## [v1.0.0] - 2025-06-11
 
-### 🚀 Major Release - AnyProxy v2
+### 🚀 Initial Release - AnyProxy
 
-AnyProxy v2 is a complete rewrite with modern architecture, multiple transport protocols, and enhanced security.
+A secure tunneling solution with modern architecture, multiple transport protocols, and enhanced security through significant code structure optimizations.
 
-#### ✨ New Features
+#### ✨ Core Features
 
 **Multi-Transport Support**
 - **WebSocket**: Firewall-friendly transport with HTTP/HTTPS compatibility
 - **gRPC**: High-performance transport with HTTP/2 multiplexing
 - **QUIC**: Ultra-low latency transport for mobile and unreliable networks
 
-**Enhanced Architecture** 
+**Modern Architecture** 
 - Group-based routing for multi-environment support
 - Port forwarding with direct service access
 - Modular transport layer design
-- Improved security with per-service access control
+- Comprehensive security with per-service access control
 
-**Deployment Improvements**
+**Production-Ready Deployment**
 - Docker containers with multi-architecture support
-- Simplified configuration with YAML format
-- Better separation of Gateway (public) and Client (private) deployments
-- Built-in certificate generation
+- Clean YAML configuration format
+- Optimized Gateway (public) and Client (private) separation
+- Automated certificate generation
 
-#### ⚙️ Configuration Changes
+#### ⚙️ Configuration
 
-**Breaking Changes from v1**
-- Configuration format changed from mixed to pure YAML
-- Transport selection required (websocket/grpc/quic)
-- Separate binary names: `anyproxy-gateway-v2` and `anyproxy-client-v2`
+**Configuration Features**
+- Pure YAML configuration format for clarity
+- Transport selection (websocket/grpc/quic)
+- Clean binary naming: `anyproxy-gateway` and `anyproxy-client`
 
-**New Configuration Options**
+**Configuration Options**
 ```yaml
 transport:
   type: "websocket"  # or "grpc", "quic"
@@ -79,74 +79,53 @@ client:
 - **Connection Pooling**: Efficient resource utilization
 - **Memory Optimization**: Reduced memory footprint
 
-### 🔧 Technical Details
+### 🔧 Technical Implementation
 
 #### Build System
-- Go 1.21+ requirement
+- Go 1.23+ requirement
 - Cross-platform builds (Linux, macOS, Windows)
 - Automated CI/CD with GitHub Actions
 - Docker multi-arch builds
+- Clean binary naming: `anyproxy-gateway` and `anyproxy-client`
 
-#### Dependencies
-- Updated to latest stable versions
-- Removed legacy dependencies
-- Added QUIC and gRPC support libraries
+#### Code Structure
+- Modern Go module organization
+- Clean package structure under `pkg/`
+- Optimized import paths
+- Well-structured dependency management
+- Comprehensive test coverage
 
-### 🐛 Bug Fixes
+### 🛡️ Reliability Features
 
-- Fixed connection leaks in long-running sessions
-- Improved error handling for network failures
-- Resolved race conditions in concurrent connections
-- Enhanced logging for better debugging
+- Robust connection management for long-running sessions
+- Comprehensive error handling for network failures
+- Thread-safe concurrent connection handling
+- Enhanced logging system for debugging and monitoring
+- Clean import paths and module organization
+- Optimized protobuf generation and management
 
 ### 📚 Documentation
 
-- Completely rewritten README with practical examples
-- Architecture diagrams for visual understanding
-- Docker deployment guides
-- Configuration reference
-
----
-
-## [v1.0.0] - 2025-05-20
-
-### 🚀 Initial Release
-
-First stable release of AnyProxy with WebSocket-based tunneling.
-
-#### Core Features
-- **HTTP/HTTPS Proxy**: Complete HTTP proxy implementation
-- **SOCKS5 Proxy**: RFC 1928 compliant SOCKS5 support
-- **WebSocket Tunneling**: Secure client-gateway communication
-- **TLS Security**: End-to-end encryption
-- **Access Control**: Host-based filtering
-
-#### Architecture
-- Gateway-Client architecture
-- WebSocket-only transport
-- Single binary design
-- YAML configuration
-
-#### Platform Support
-- Linux (primary platform)
-- macOS (development)
-- Windows (basic support)
+- Comprehensive README with practical examples
+- Clear architecture documentation
+- Complete Docker deployment guides
+- Detailed configuration reference for all transport types
+- Consistent naming conventions throughout
 
 ---
 
 ## Version Support
 
-### Current Versions
-- **v2.x**: Active development and support (Recommended)
-- **v1.x**: Maintenance mode (Security fixes only)
+### Current Version
+- **v1.x**: Active development and support (Current stable)
 
-### Upgrade Path
-- **v1.x → v2.x**: Configuration migration required
-- **Docker**: Use `buhuipao/anyproxy:latest` for v2
-- **Binaries**: Use `anyproxy-*-v2` binaries
+### Usage
+- **Docker**: Use `buhuipao/anyproxy:latest`
+- **Binaries**: Use `anyproxy-gateway` and `anyproxy-client`
+- **Source**: Build from source with Go 1.23+
 
 ### System Requirements
-- **Go**: 1.21+ (for building from source)
+- **Go**: 1.23+ (for building from source)
 - **OS**: Linux (primary), macOS, Windows
 - **Memory**: 50MB+ per instance
 - **Network**: Internet connectivity for tunneling

@@ -1,4 +1,4 @@
-# AnyProxy v2
+# AnyProxy
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Version](https://img.shields.io/badge/Go-1.21+-blue.svg)](https://golang.org)
@@ -6,7 +6,7 @@
 [![Build Status](https://img.shields.io/badge/Build-Passing-green.svg)]()
 [![Release](https://img.shields.io/github/v/release/buhuipao/anyproxy)](https://github.com/buhuipao/anyproxy/releases)
 
-AnyProxy v2 is a secure tunneling solution that enables you to expose local services to the internet through multiple transport protocols. Built with a modular architecture supporting WebSocket, gRPC, and QUIC transports with end-to-end TLS encryption.
+AnyProxy is a secure tunneling solution that enables you to expose local services to the internet through multiple transport protocols. Built with a modular architecture supporting WebSocket, gRPC, and QUIC transports with end-to-end TLS encryption.
 
 ## 📑 Table of Contents
 
@@ -184,7 +184,7 @@ docker run -d --name anyproxy-gateway \
   -v $(pwd)/configs:/app/configs:ro \
   -v $(pwd)/certs:/app/certs:ro \
   -v $(pwd)/logs:/app/logs \
-  buhuipao/anyproxy:latest ./anyproxy-gateway-v2 --config configs/gateway.yaml
+  buhuipao/anyproxy:latest ./anyproxy-gateway --config configs/gateway.yaml
 ```
 
 ### Step 2: Deploy Client (Private Network)
@@ -247,7 +247,7 @@ docker run -d --name anyproxy-client \
   -v $(pwd)/configs:/app/configs:ro \
   -v $(pwd)/certs:/app/certs:ro \
   -v $(pwd)/logs:/app/logs \
-  buhuipao/anyproxy:latest ./anyproxy-client-v2 --config configs/client.yaml
+  buhuipao/anyproxy:latest ./anyproxy-client --config configs/client.yaml
 ```
 
 ### Step 3: Test Connection
@@ -386,7 +386,7 @@ services:
   anyproxy-gateway:
     image: buhuipao/anyproxy:latest
     container_name: anyproxy-gateway
-    command: ./anyproxy-gateway-v2 --config configs/gateway.yaml
+            command: ./anyproxy-gateway --config configs/gateway.yaml
     ports:
       - "8080:8080"   # HTTP proxy
       - "1080:1080"   # SOCKS5 proxy
@@ -406,7 +406,7 @@ services:
   anyproxy-client:
     image: buhuipao/anyproxy:latest
     container_name: anyproxy-client
-    command: ./anyproxy-client-v2 --config configs/client.yaml
+            command: ./anyproxy-client --config configs/client.yaml
     volumes:
       - ./configs:/app/configs:ro
       - ./certs:/app/certs:ro
@@ -482,10 +482,10 @@ curl --socks5 user:pass@gateway:1080 http://localhost:22
 **Key Commands:**
 ```bash
 # Start gateway
-./anyproxy-gateway-v2 --config gateway.yaml
+./anyproxy-gateway --config gateway.yaml
 
 # Start client  
-./anyproxy-client-v2 --config client.yaml
+./anyproxy-client --config client.yaml
 
 # Test connection
 curl -x http://user:pass@gateway:8080 https://httpbin.org/ip
@@ -511,7 +511,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - 🐛 **Issues**: [GitHub Issues](https://github.com/buhuipao/anyproxy/issues)
 - 💬 **Discussions**: [GitHub Discussions](https://github.com/buhuipao/anyproxy/discussions)
-- 📧 **Email**: support@anyproxy.io
+- 📧 **Email**: chenhua22@outlook.com
 - 🌟 **Star us** on GitHub if AnyProxy helps you!
 
 ---

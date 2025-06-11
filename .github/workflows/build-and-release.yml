@@ -121,9 +121,9 @@ jobs:
           EXT=".exe"
         fi
         
-        # Build v2 gateway and client
-        go build -ldflags="-s -w" -o build/${{ matrix.goos }}-${{ matrix.goarch }}/${{ env.PROJECT_NAME }}-gateway-v2${EXT} cmd/v2/gateway/main.go
-        go build -ldflags="-s -w" -o build/${{ matrix.goos }}-${{ matrix.goarch }}/${{ env.PROJECT_NAME }}-client-v2${EXT} cmd/v2/client/main.go
+        # Build gateway and client
+        go build -ldflags="-s -w" -o build/${{ matrix.goos }}-${{ matrix.goarch }}/${{ env.PROJECT_NAME }}-gateway${EXT} cmd/gateway/main.go
+        go build -ldflags="-s -w" -o build/${{ matrix.goos }}-${{ matrix.goarch }}/${{ env.PROJECT_NAME }}-client${EXT} cmd/client/main.go
         
         # Copy configuration files and certificates
         cp -r configs build/${{ matrix.goos }}-${{ matrix.goarch }}/

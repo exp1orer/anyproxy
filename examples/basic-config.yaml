@@ -1,4 +1,4 @@
-# AnyProxy v2 Basic Configuration
+# AnyProxy Basic Configuration
 # Simple setup for HTTP/SOCKS5 proxy with WebSocket transport
 
 log:
