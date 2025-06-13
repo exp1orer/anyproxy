@@ -64,6 +64,15 @@ func (c *Client) handleMessages() {
 
 // routeMessage routes messages to appropriate connection's message channel
 func (c *Client) routeMessage(msg map[string]interface{}) {
+	// Minimal fix: recover from potential panic due to race condition with closed channels
+	defer func() {
+		if r := recover(); r != nil {
+			if connID, ok := msg["id"].(string); ok {
+				logger.Debug("Recovered from panic in routeMessage - channel likely closed during send", "client_id", c.getClientID(), "conn_id", connID)
+			}
+		}
+	}()
+
 	connID, ok := msg["id"].(string)
 	if !ok {
 		logger.Error("Invalid connection ID in message from gateway", "client_id", c.getClientID(), "message_fields", utils.GetMessageFields(msg))
