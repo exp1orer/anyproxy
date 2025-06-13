@@ -34,6 +34,7 @@ type LogConfig struct {
 type ProxyConfig struct {
 	SOCKS5 SOCKS5Config `yaml:"socks5"`
 	HTTP   HTTPConfig   `yaml:"http"`
+	TUIC   TUICConfig   `yaml:"tuic"`
 }
 
 // GatewayConfig represents the configuration for the proxy gateway
@@ -63,6 +64,15 @@ type HTTPConfig struct {
 	ListenAddr   string `yaml:"listen_addr"`
 	AuthUsername string `yaml:"auth_username"`
 	AuthPassword string `yaml:"auth_password"`
+}
+
+// TUICConfig represents the configuration for the TUIC proxy
+type TUICConfig struct {
+	ListenAddr string `yaml:"listen_addr"`
+	Token      string `yaml:"token"`     // TUIC token for authentication
+	UUID       string `yaml:"uuid"`      // TUIC UUID for client identification
+	CertFile   string `yaml:"cert_file"` // TLS certificate file (TUIC requires TLS)
+	KeyFile    string `yaml:"key_file"`  // TLS private key file
 }
 
 // ServiceLimit defines allowed services for the client

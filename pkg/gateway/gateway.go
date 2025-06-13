@@ -121,11 +121,24 @@ func NewGateway(cfg *config.Config, transportType string) (*Gateway, error) {
 		logger.Info("SOCKS5 proxy configured successfully", "listen_addr", cfg.Proxy.SOCKS5.ListenAddr)
 	}
 
+	// Create TUIC proxy
+	if cfg.Proxy.TUIC.ListenAddr != "" {
+		logger.Info("Configuring TUIC proxy", "listen_addr", cfg.Proxy.TUIC.ListenAddr, "uuid", cfg.Proxy.TUIC.UUID)
+		tuicProxy, err := protocols.NewTUICProxyWithAuth(&cfg.Proxy.TUIC, dialFn, gateway.extractGroupFromUsername)
+		if err != nil {
+			cancel()
+			logger.Error("Failed to create TUIC proxy", "listen_addr", cfg.Proxy.TUIC.ListenAddr, "err", err)
+			return nil, fmt.Errorf("failed to create TUIC proxy: %v", err)
+		}
+		proxies = append(proxies, tuicProxy)
+		logger.Info("TUIC proxy configured successfully", "listen_addr", cfg.Proxy.TUIC.ListenAddr, "uuid", cfg.Proxy.TUIC.UUID)
+	}
+
 	// Ensure at least one proxy is configured
 	if len(proxies) == 0 {
 		cancel()
-		logger.Error("No proxy configured - at least one proxy type must be enabled", "http_addr", cfg.Proxy.HTTP.ListenAddr, "socks5_addr", cfg.Proxy.SOCKS5.ListenAddr)
-		return nil, fmt.Errorf("no proxy configured: please configure at least one of HTTP or SOCKS5 proxy")
+		logger.Error("No proxy configured - at least one proxy type must be enabled", "http_addr", cfg.Proxy.HTTP.ListenAddr, "socks5_addr", cfg.Proxy.SOCKS5.ListenAddr, "tuic_addr", cfg.Proxy.TUIC.ListenAddr)
+		return nil, fmt.Errorf("no proxy configured: please configure at least one of HTTP, SOCKS5, or TUIC proxy")
 	}
 
 	gateway.proxies = proxies

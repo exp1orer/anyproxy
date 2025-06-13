@@ -26,7 +26,10 @@ AnyProxy is a secure tunneling solution that enables you to expose local service
 
 - 🔄 **Multiple Transport Protocols**: Choose between WebSocket, gRPC, or QUIC
 - 🔐 **End-to-End TLS Encryption**: Secure communication for all protocols  
-- 🚀 **Dual Proxy Support**: HTTP/HTTPS and SOCKS5 proxies
+- 🚀 **Triple Proxy Support**: HTTP/HTTPS, SOCKS5, and TUIC proxies
+  - **HTTP Proxy**: Standard web browsing and API access
+  - **SOCKS5 Proxy**: Universal protocol support with low overhead  
+  - **TUIC Proxy**: Ultra-low latency UDP-based proxy with 0-RTT handshake
 - 🎯 **Group-Based Routing**: Route traffic to specific client groups
 - ⚡ **Port Forwarding**: Direct port mapping for services
 - 🌐 **Cross-Platform**: Linux, macOS, Windows support
@@ -37,20 +40,21 @@ AnyProxy is a secure tunneling solution that enables you to expose local service
 ### System Architecture
 
 ```
-Internet Users                    Public Gateway Server                   Private Networks
-     │                                    │                                     │
-     │ ◄─── HTTP/SOCKS5 Proxy ───► ┌─────────────┐ ◄─── TLS Tunnels ───► ┌──────────────┐
-     │                             │   Gateway   │                       │   Clients    │
-     │                             │             │                       │              │
-     │                             │ • HTTP:8080 │                       │ • SSH Server │
-     │                             │ • SOCKS:1080│                       │ • Web Apps   │
-     │                             │             │                       │ • Databases  │
-     │                             │ Transports: │                       │ • AI Models  │
-     │                             │ • WS:8443   │                       │              │
-     │                             │ • gRPC:9090 │                       │              │
-     │                             │ • QUIC:9091 │                       │              │
-     │                             └─────────────┘                       └──────────────┘
-     │                                    │                                     │
+Internet Users                       Public Gateway Server                   Private Networks
+     │                                       │                                     │
+     │ ◄─── HTTP/SOCKS5/TUIC Proxy ──► ┌─────────────┐ ◄─── TLS Tunnels ───► ┌──────────────┐
+     │                                 │   Gateway   │                       │   Clients    │
+     │                                 │             │                       │              │
+     │                                 │ • HTTP:8080 │                       │ • SSH Server │
+     │                                 │ • SOCKS:1080│                       │ • Web Apps   │
+     │                                 │ • TUIC:9443 │                       │ • Databases  │
+     │                                 │             │                       │ • AI Models  │
+     │                                 │ Transports: │                       │              │
+     │                                 │ • WS:8443   │                       │              │
+     │                                 │ • gRPC:9090 │                       │              │
+     │                                 │ • QUIC:9091 │                       │              │
+     │                                 └─────────────┘                       └──────────────┘
+     │                                        │                                     │
 SSH, Web, AI ←────────────────── Secure Proxy Connection ──────────────→ Local Services
 ```
 
@@ -61,6 +65,14 @@ SSH, Web, AI ←────────────────── Secure Pr
 | **WebSocket** | Firewall compatibility | • Works through most firewalls<br>• HTTP/HTTPS compatible<br>• Wide browser support | 8443 |
 | **gRPC** | High performance | • HTTP/2 multiplexing<br>• Efficient binary protocol<br>• Built-in load balancing | 9090 |
 | **QUIC** | Mobile/unreliable networks | • Ultra-low latency<br>• 0-RTT handshake<br>• Connection migration | 9091 |
+
+### Proxy Protocols Comparison
+
+| Protocol | Type | Best For | Key Features | Port |
+|----------|------|----------|--------------|------|
+| **HTTP** | TCP | Web browsing, API calls | • Standard HTTP CONNECT<br>• Compatible with all browsers<br>• Simple authentication | 8080 |
+| **SOCKS5** | TCP | General purpose | • Protocol agnostic<br>• Low overhead<br>• Wide client support | 1080 |
+| **TUIC** | UDP | Gaming, real-time apps | • 0-RTT connection setup<br>• Built-in multiplexing<br>• Connection migration<br>• TLS 1.3 required | 9443 |
 
 **Note**: Each Gateway/Client instance uses only ONE transport protocol.
 
@@ -161,6 +173,12 @@ proxy:
     listen_addr: ":1080"
     auth_username: "socks_user"
     auth_password: "secure_socks_password"
+  tuic:
+    listen_addr: ":9443"
+    token: "your-tuic-token-here"
+    uuid: "12345678-1234-5678-9abc-123456789abc"
+    cert_file: "certs/server.crt"
+    key_file: "certs/server.key"
 
 gateway:
   listen_addr: ":8443"  # WebSocket port (use :9090 for gRPC, :9091 for QUIC)
@@ -180,7 +198,7 @@ openssl req -x509 -newkey rsa:2048 -keyout certs/server.key -out certs/server.cr
 # Start gateway
 docker run -d --name anyproxy-gateway \
   --restart unless-stopped \
-  -p 8080:8080 -p 1080:1080 -p 8443:8443 \
+  -p 8080:8080 -p 1080:1080 -p 9443:9443/udp -p 8443:8443 \
   -v $(pwd)/configs:/app/configs:ro \
   -v $(pwd)/certs:/app/certs:ro \
   -v $(pwd)/logs:/app/logs \
@@ -261,6 +279,9 @@ curl -x http://proxy_user:secure_proxy_password@YOUR_PUBLIC_SERVER_IP:8080 \
 curl --socks5 socks_user:secure_socks_password@YOUR_PUBLIC_SERVER_IP:1080 \
   http://localhost:22
 
+# Test TUIC proxy (requires TUIC-compatible client)
+# Use TUIC client with: tuic://your-tuic-token@YOUR_PUBLIC_SERVER_IP:9443?uuid=12345678-1234-5678-9abc-123456789abc
+
 # Test port forwarding (if configured)
 ssh -p 2222 user@YOUR_PUBLIC_SERVER_IP
 ```
@@ -331,6 +352,42 @@ open_ports:
 psql -h YOUR_GATEWAY_IP -p 5432 -U postgres mydb
 ```
 
+### 4. TUIC Proxy (Ultra-Low Latency)
+
+**TUIC Setup for 0-RTT Performance:**
+```bash
+# Gateway: Enable TUIC proxy in configuration
+proxy:
+  tuic:
+    listen_addr: ":9443"
+    token: "your-secure-token"
+    uuid: "12345678-1234-5678-9abc-123456789abc"
+    cert_file: "certs/server.crt"
+    key_file: "certs/server.key"
+
+# TUIC provides:
+# - 0-RTT connection establishment
+# - Built-in UDP and TCP multiplexing
+# - Optimal for mobile networks
+# - Enhanced connection migration
+
+# Client usage (with TUIC-compatible clients):
+# tuic://your-secure-token@YOUR_GATEWAY_IP:9443?uuid=12345678-1234-5678-9abc-123456789abc
+```
+
+**TUIC is ideal for:**
+- **Gaming Applications**: Minimal latency for real-time gaming
+- **Video Streaming**: Smooth streaming with connection migration
+- **Mobile Networks**: Handles network switching seamlessly
+- **IoT Devices**: Efficient for frequent short-lived connections
+- **Real-time Communications**: VoIP, video calls, live chat
+
+**Performance Benefits:**
+- **0-RTT Handshake**: Connect instantly without round-trip delays
+- **Connection Migration**: Maintain connections when switching networks
+- **Multiplexing**: Multiple data streams over single UDP connection
+- **TLS 1.3**: Modern encryption with perfect forward secrecy
+
 ## ⚙️ Configuration
 
 ### Transport Selection
@@ -356,6 +413,25 @@ transport:
 gateway:
   listen_addr: ":9091"
 ```
+
+### TUIC Proxy Configuration
+
+```yaml
+proxy:
+  tuic:
+    listen_addr: ":9443"               # UDP port for TUIC
+    token: "your-tuic-token"           # TUIC protocol token
+    uuid: "12345678-1234-5678-9abc-123456789abc"  # TUIC client UUID
+    cert_file: "certs/server.crt"      # TLS certificate (required)
+    key_file: "certs/server.key"       # TLS private key (required)
+```
+
+**TUIC Protocol Features:**
+- **0-RTT Handshake**: Ultra-fast connection establishment
+- **UDP-Based**: Built on QUIC for optimal performance
+- **TLS 1.3 Required**: Mandatory encryption
+- **Multiplexing**: Multiple streams over single connection
+- **Connection Migration**: Seamless network switching
 
 ### Security Configuration
 
@@ -388,9 +464,10 @@ services:
     container_name: anyproxy-gateway
             command: ./anyproxy-gateway --config configs/gateway.yaml
     ports:
-      - "8080:8080"   # HTTP proxy
-      - "1080:1080"   # SOCKS5 proxy
-      - "8443:8443"   # WebSocket (or 9090 for gRPC, 9091 for QUIC)
+      - "8080:8080"     # HTTP proxy
+      - "1080:1080"     # SOCKS5 proxy
+      - "9443:9443/udp" # TUIC proxy (UDP)
+      - "8443:8443"     # WebSocket (or 9090 for gRPC, 9091 for QUIC)
     volumes:
       - ./configs:/app/configs:ro
       - ./certs:/app/certs:ro
@@ -433,6 +510,9 @@ certbot certonly --standalone -d gateway.yourdomain.com
 ```bash
 # Check gateway connectivity
 curl -x http://user:pass@gateway:8080 https://httpbin.org/ip
+
+# Check TUIC proxy port (UDP)
+nc -u -v gateway 9443
 
 # Check logs
 docker logs anyproxy-gateway
@@ -477,6 +557,7 @@ curl --socks5 user:pass@gateway:1080 http://localhost:22
 **Default Ports:**
 - HTTP Proxy: `8080`
 - SOCKS5 Proxy: `1080`
+- TUIC Proxy: `9443` (UDP)
 - WebSocket: `8443`, gRPC: `9090`, QUIC: `9091`
 
 **Key Commands:**
