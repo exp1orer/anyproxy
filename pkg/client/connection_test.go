@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"regexp"
 	"sync"
 	"testing"
 	"time"
@@ -435,6 +434,11 @@ func TestHandleConnection(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Register mock transport for this test
+			transport.RegisterTransportCreator("websocket", func(authConfig *transport.AuthConfig) transport.Transport {
+				return &mockTransportForConn{}
+			})
+
 			// Create client
 			config := &config.ClientConfig{
 				ClientID:    "test-client",
@@ -446,17 +450,11 @@ func TestHandleConnection(t *testing.T) {
 				config.ForbiddenHosts = []string{"forbidden.com"}
 			}
 
-			client := &Client{
-				config:           config,
-				connMgr:          connection.NewManager(config.ClientID),
-				ctx:              context.Background(),
-				forbiddenHostsRe: []*regexp.Regexp{},
+			client, err := NewClient(config, "websocket", 0)
+			if err != nil {
+				t.Fatalf("Failed to create client: %v", err)
 			}
-
-			// Compile patterns if needed
-			if tt.forbiddenHost {
-				client.compileHostPatterns()
-			}
+			client.ctx = context.Background()
 
 			// Create mock connection
 			mockConn := &mockConnectionForTest{

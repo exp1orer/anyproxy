@@ -232,16 +232,16 @@ func TestNewClient(t *testing.T) {
 
 				// Verify compiled patterns
 				if len(tt.config.ForbiddenHosts) > 0 {
-					if len(client.forbiddenHostsRe) != len(tt.config.ForbiddenHosts) {
-						t.Errorf("ForbiddenHosts regex count = %d, want %d",
-							len(client.forbiddenHostsRe), len(tt.config.ForbiddenHosts))
+					if len(client.forbiddenHostPatterns) != len(tt.config.ForbiddenHosts) {
+						t.Errorf("ForbiddenHosts pattern count = %d, want %d",
+							len(client.forbiddenHostPatterns), len(tt.config.ForbiddenHosts))
 					}
 				}
 
 				if len(tt.config.AllowedHosts) > 0 {
-					if len(client.allowedHostsRe) != len(tt.config.AllowedHosts) {
-						t.Errorf("AllowedHosts regex count = %d, want %d",
-							len(client.allowedHostsRe), len(tt.config.AllowedHosts))
+					if len(client.allowedHostPatterns) != len(tt.config.AllowedHosts) {
+						t.Errorf("AllowedHosts pattern count = %d, want %d",
+							len(client.allowedHostPatterns), len(tt.config.AllowedHosts))
 					}
 				}
 
@@ -326,30 +326,20 @@ func TestClientCompileHostPatterns(t *testing.T) {
 			}
 
 			if !tt.wantErr {
-				// Test pattern matching
+				// Test pattern matching using the isConnectionAllowed method
 				for _, test := range tt.testHosts {
-					// Test forbidden patterns
-					forbidden := false
-					for _, re := range client.forbiddenHostsRe {
-						if re.MatchString(test.host) {
-							forbidden = true
-							break
-						}
-					}
-					if forbidden != test.forbidden {
-						t.Errorf("Host %s: forbidden = %v, want %v", test.host, forbidden, test.forbidden)
-					}
+					// Set client ID for logging
+					client.config.ClientID = "test-client"
 
-					// Test allowed patterns
-					allowed := false
-					for _, re := range client.allowedHostsRe {
-						if re.MatchString(test.host) {
-							allowed = true
-							break
-						}
-					}
-					if allowed != test.allowed {
-						t.Errorf("Host %s: allowed = %v, want %v", test.host, allowed, test.allowed)
+					// Test connection allowance
+					allowed := client.isConnectionAllowed(test.host)
+
+					// Check if result matches expectation based on forbidden/allowed settings
+					expectedAllowed := !test.forbidden && (len(tt.allowedHosts) == 0 || test.allowed)
+
+					if allowed != expectedAllowed {
+						t.Errorf("Host %s: isConnectionAllowed = %v, want %v (forbidden=%v, allowed=%v)",
+							test.host, allowed, expectedAllowed, test.forbidden, test.allowed)
 					}
 				}
 			}

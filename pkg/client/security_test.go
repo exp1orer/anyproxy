@@ -75,14 +75,14 @@ func TestCompileHostPatterns(t *testing.T) {
 
 			if !tt.expectErr {
 				// Verify patterns were compiled
-				if len(client.forbiddenHostsRe) != len(tt.forbiddenHosts) {
+				if len(client.forbiddenHostPatterns) != len(tt.forbiddenHosts) {
 					t.Errorf("Expected %d forbidden patterns, got %d",
-						len(tt.forbiddenHosts), len(client.forbiddenHostsRe))
+						len(tt.forbiddenHosts), len(client.forbiddenHostPatterns))
 				}
 
-				if len(client.allowedHostsRe) != len(tt.allowedHosts) {
+				if len(client.allowedHostPatterns) != len(tt.allowedHosts) {
 					t.Errorf("Expected %d allowed patterns, got %d",
-						len(tt.allowedHosts), len(client.allowedHostsRe))
+						len(tt.allowedHosts), len(client.allowedHostPatterns))
 				}
 			}
 		})
@@ -317,6 +317,358 @@ kZuMN5z5SlANRxCDg1oXhRfO3P8Yq7EBRRF8CZMixMFyP+9apYqtH6qAg3w=
 				// Check ServerName
 				if tt.expectServName != "" && tlsConfig.ServerName != tt.expectServName {
 					t.Errorf("Expected ServerName %s, got %s", tt.expectServName, tlsConfig.ServerName)
+				}
+			}
+		})
+	}
+}
+
+func TestEnhancedHostPatterns(t *testing.T) {
+	tests := []struct {
+		name           string
+		forbiddenHosts []string
+		allowedHosts   []string
+		address        string
+		expectAllowed  bool
+	}{
+		// CIDR Pattern Tests
+		{
+			name:           "CIDR - IPv4 block allowed",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"192.168.1.0/24"},
+			address:        "192.168.1.10:80",
+			expectAllowed:  true,
+		},
+		{
+			name:           "CIDR - IPv4 block forbidden",
+			forbiddenHosts: []string{"192.168.1.0/24"},
+			allowedHosts:   []string{},
+			address:        "192.168.1.10:80",
+			expectAllowed:  false,
+		},
+		{
+			name:           "CIDR - Outside IPv4 block",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"192.168.1.0/24"},
+			address:        "192.168.2.10:80",
+			expectAllowed:  false,
+		},
+		{
+			name:           "CIDR with port - exact match",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"192.168.1.0/24:22"},
+			address:        "192.168.1.10:22",
+			expectAllowed:  true,
+		},
+		{
+			name:           "CIDR with port - wrong port",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"192.168.1.0/24:22"},
+			address:        "192.168.1.10:80",
+			expectAllowed:  false,
+		},
+		{
+			name:           "CIDR with wildcard port",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"192.168.1.0/24:*"},
+			address:        "192.168.1.10:8080",
+			expectAllowed:  true,
+		},
+		{
+			name:           "CIDR - Private network block",
+			forbiddenHosts: []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
+			allowedHosts:   []string{},
+			address:        "10.1.1.1:80",
+			expectAllowed:  false,
+		},
+
+		// Host:Port Pattern Tests
+		{
+			name:           "Host:Port - exact match",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"localhost:22"},
+			address:        "localhost:22",
+			expectAllowed:  true,
+		},
+		{
+			name:           "Host:Port - wrong port",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"localhost:22"},
+			address:        "localhost:80",
+			expectAllowed:  false,
+		},
+		{
+			name:           "Host:Port - wrong host",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"localhost:22"},
+			address:        "example.com:22",
+			expectAllowed:  false,
+		},
+
+		// Wildcard Pattern Tests
+		{
+			name:           "Host wildcard port",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"localhost:*"},
+			address:        "localhost:8080",
+			expectAllowed:  true,
+		},
+		{
+			name:           "Port wildcard host",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"*:22"},
+			address:        "example.com:22",
+			expectAllowed:  true,
+		},
+		{
+			name:           "Port wildcard - wrong port",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"*:22"},
+			address:        "example.com:80",
+			expectAllowed:  false,
+		},
+		{
+			name:           "Wildcard all",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"*:*"},
+			address:        "anything.com:12345",
+			expectAllowed:  true,
+		},
+		{
+			name:           "Subdomain wildcard",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"*.example.com:*"},
+			address:        "api.example.com:443",
+			expectAllowed:  true,
+		},
+		{
+			name:           "Subdomain wildcard - wrong domain",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"*.example.com:*"},
+			address:        "api.other.com:443",
+			expectAllowed:  false,
+		},
+
+		// Mixed Pattern Tests
+		{
+			name:           "Mixed - CIDR forbidden, host:port allowed",
+			forbiddenHosts: []string{"192.168.1.0/24"},
+			allowedHosts:   []string{"localhost:22", "example.com:80"},
+			address:        "localhost:22",
+			expectAllowed:  true,
+		},
+		{
+			name:           "Mixed - CIDR forbidden takes precedence",
+			forbiddenHosts: []string{"192.168.1.0/24"},
+			allowedHosts:   []string{"192.168.1.10:80"}, // Specific host in forbidden CIDR
+			address:        "192.168.1.10:80",
+			expectAllowed:  false,
+		},
+
+		// Backward Compatibility - Regex Pattern Tests
+		{
+			name:           "Regex - dot escape",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"example\\.com:80"},
+			address:        "example.com:80",
+			expectAllowed:  true,
+		},
+		{
+			name:           "Regex - wildcard pattern",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{".*\\.trusted\\.com"},
+			address:        "api.trusted.com:443",
+			expectAllowed:  true,
+		},
+		{
+			name:           "Regex - complex pattern",
+			forbiddenHosts: []string{"^evil\\.(com|org|net):.*$"},
+			allowedHosts:   []string{},
+			address:        "evil.com:80",
+			expectAllowed:  false,
+		},
+
+		// Edge Cases
+		{
+			name:           "IPv6 address",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"[::1]:*"},
+			address:        "[::1]:8080",
+			expectAllowed:  true,
+		},
+		{
+			name:           "Address without port",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"localhost:*"},
+			address:        "localhost",
+			expectAllowed:  true,
+		},
+		{
+			name:           "High port number",
+			forbiddenHosts: []string{},
+			allowedHosts:   []string{"*:65535"},
+			address:        "example.com:65535",
+			expectAllowed:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &Client{
+				config: &config.ClientConfig{
+					ClientID:       "test-client",
+					ForbiddenHosts: tt.forbiddenHosts,
+					AllowedHosts:   tt.allowedHosts,
+				},
+			}
+
+			// Compile patterns
+			if err := client.compileHostPatterns(); err != nil {
+				t.Fatalf("Failed to compile patterns: %v", err)
+			}
+
+			// Test connection
+			allowed := client.isConnectionAllowed(tt.address)
+
+			if allowed != tt.expectAllowed {
+				t.Errorf("isConnectionAllowed(%s) = %v, want %v",
+					tt.address, allowed, tt.expectAllowed)
+			}
+		})
+	}
+}
+
+func TestCompileHostPatternTypes(t *testing.T) {
+	tests := []struct {
+		name          string
+		pattern       string
+		expectedType  string
+		expectErr     bool
+		errorContains string
+	}{
+		// CIDR Patterns
+		{
+			name:         "Valid IPv4 CIDR",
+			pattern:      "192.168.1.0/24",
+			expectedType: "cidr",
+			expectErr:    false,
+		},
+		{
+			name:         "Valid IPv6 CIDR",
+			pattern:      "2001:db8::/32",
+			expectedType: "cidr",
+			expectErr:    false,
+		},
+		{
+			name:         "CIDR with port",
+			pattern:      "192.168.1.0/24:22",
+			expectedType: "cidr",
+			expectErr:    false,
+		},
+		{
+			name:         "CIDR with wildcard port",
+			pattern:      "192.168.1.0/24:*",
+			expectedType: "cidr",
+			expectErr:    false,
+		},
+		{
+			name:          "Invalid CIDR",
+			pattern:       "192.168.1.0/99",
+			expectedType:  "",
+			expectErr:     true,
+			errorContains: "invalid CIDR notation",
+		},
+
+		// Host:Port Patterns
+		{
+			name:         "Host with port",
+			pattern:      "localhost:22",
+			expectedType: "host_port",
+			expectErr:    false,
+		},
+		{
+			name:         "Host with wildcard port",
+			pattern:      "localhost:*",
+			expectedType: "host_wildcard",
+			expectErr:    false,
+		},
+		{
+			name:          "Host with invalid port",
+			pattern:       "localhost:99999",
+			expectedType:  "",
+			expectErr:     true,
+			errorContains: "invalid port number",
+		},
+		{
+			name:          "Host with non-numeric port",
+			pattern:       "localhost:abc",
+			expectedType:  "",
+			expectErr:     true,
+			errorContains: "invalid port number",
+		},
+
+		// Wildcard Patterns
+		{
+			name:         "Wildcard host with port",
+			pattern:      "*:80",
+			expectedType: "port_wildcard",
+			expectErr:    false,
+		},
+		{
+			name:         "Wildcard all",
+			pattern:      "*:*",
+			expectedType: "wildcard_all",
+			expectErr:    false,
+		},
+		{
+			name:         "Subdomain wildcard",
+			pattern:      "*.example.com:*",
+			expectedType: "regex",
+			expectErr:    false,
+		},
+
+		// Regex Patterns (backward compatibility)
+		{
+			name:         "Regex with dots",
+			pattern:      "example\\.com",
+			expectedType: "regex",
+			expectErr:    false,
+		},
+		{
+			name:         "Regex with brackets",
+			pattern:      "example\\.(com|org)",
+			expectedType: "regex",
+			expectErr:    false,
+		},
+		{
+			name:          "Invalid regex",
+			pattern:       "[invalid regex",
+			expectedType:  "",
+			expectErr:     true,
+			errorContains: "invalid regex pattern",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pattern, err := compileHostPattern(tt.pattern)
+
+			if (err != nil) != tt.expectErr {
+				t.Errorf("compileHostPattern() error = %v, expectErr %v", err, tt.expectErr)
+			}
+
+			if err != nil && tt.errorContains != "" {
+				if !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("Expected error to contain '%s', got '%s'", tt.errorContains, err.Error())
+				}
+			}
+
+			if !tt.expectErr {
+				if pattern.Type != tt.expectedType {
+					t.Errorf("Expected pattern type '%s', got '%s'", tt.expectedType, pattern.Type)
+				}
+				if pattern.Original != tt.pattern {
+					t.Errorf("Expected original pattern '%s', got '%s'", tt.pattern, pattern.Original)
 				}
 			}
 		})

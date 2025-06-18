@@ -4,7 +4,6 @@ package client
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"sync"
 	"time"
 
@@ -37,9 +36,9 @@ type Client struct {
 	// 🆕 Shared message handler
 	msgHandler message.ExtendedMessageHandler
 
-	// Fix: Pre-compiled regular expressions to avoid recompiling on each request
-	forbiddenHostsRe []*regexp.Regexp // Fix: Pre-compiled forbidden host regular expressions
-	allowedHostsRe   []*regexp.Regexp // Fix: Pre-compiled allowed host regular expressions
+	// Enhanced host pattern matching
+	forbiddenHostPatterns []*HostPattern // Enhanced forbidden host patterns
+	allowedHostPatterns   []*HostPattern // Enhanced allowed host patterns
 }
 
 // NewClient creates a new proxy client
@@ -95,7 +94,7 @@ func NewClient(cfg *config.ClientConfig, transportType string, replicaIdx int) (
 		return nil, fmt.Errorf("failed to compile host patterns: %v", err)
 	}
 
-	logger.Debug("Created client with compiled host patterns", "id", cfg.ClientID, "forbidden_patterns", len(client.forbiddenHostsRe), "allowed_patterns", len(client.allowedHostsRe))
+	logger.Debug("Created client with compiled host patterns", "id", cfg.ClientID, "forbidden_patterns", len(client.forbiddenHostPatterns), "allowed_patterns", len(client.allowedHostPatterns))
 
 	logger.Debug("Client initialization completed", "client_id", cfg.ClientID, "transport_type", transportType)
 

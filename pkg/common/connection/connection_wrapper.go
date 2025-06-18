@@ -9,7 +9,6 @@ import (
 )
 
 // ConnWrapper wraps a net.Conn and provides custom LocalAddr and RemoteAddr
-//
 type ConnWrapper struct {
 	net.Conn
 	localAddr     net.Addr

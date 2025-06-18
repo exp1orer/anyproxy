@@ -198,7 +198,9 @@ func (p *TUICProxy) Stop() error {
 	close(p.stopCh)
 
 	if p.listener != nil {
-		p.listener.Close()
+		if err := p.listener.Close(); err != nil {
+			logger.Error("Failed to close listener", "err", err)
+		}
 	}
 
 	// Close all UDP sessions
@@ -206,7 +208,9 @@ func (p *TUICProxy) Stop() error {
 	for _, clientSessions := range p.udpSessions {
 		for _, session := range clientSessions {
 			if session.TargetConn != nil {
-				session.TargetConn.Close()
+				if err := session.TargetConn.Close(); err != nil {
+					logger.Error("Failed to close UDP session", "err", err)
+				}
 			}
 		}
 	}
@@ -388,7 +392,11 @@ func (p *TUICProxy) handleConnect(clientAddr net.Addr, clientID string, cmd *TUI
 	// Note: In a real QUIC implementation, this would establish a bidirectional stream
 	// For UDP-based simulation, we log the successful connection
 	// The actual TCP relay would happen through QUIC streams
-	defer targetConn.Close()
+	defer func() {
+		if err := targetConn.Close(); err != nil {
+			logger.Error("Failed to close target connection", "err", err)
+		}
+	}()
 }
 
 // getAuthenticatedClient gets an authenticated client by ID
@@ -642,7 +650,7 @@ func (p *TUICProxy) handlePacketFragmentation(clientID string, packetData *TUICP
 			PacketID:  packetData.PacketID,
 			FragTotal: 1,
 			FragID:    0,
-			Size:      uint16(len(completePayload)),
+			Size:      p.safeUint16(len(completePayload)),
 			Address:   assembler.TargetAddr,
 			Payload:   completePayload,
 		}
@@ -702,7 +710,9 @@ func (p *TUICProxy) relayUDPBack(clientID string, session *TUICUDPSession) {
 		p.udpSessionsMu.Unlock()
 
 		if session.TargetConn != nil {
-			session.TargetConn.Close()
+			if err := session.TargetConn.Close(); err != nil {
+				logger.Error("Failed to close UDP session", "err", err)
+			}
 		}
 	}()
 
@@ -712,7 +722,10 @@ func (p *TUICProxy) relayUDPBack(clientID string, session *TUICUDPSession) {
 		case <-p.stopCh:
 			return
 		default:
-			session.TargetConn.SetReadDeadline(time.Now().Add(30 * time.Second))
+			if err := session.TargetConn.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
+				logger.Error("Failed to set read deadline", "err", err)
+				return
+			}
 			n, srcAddr, err := session.TargetConn.ReadFrom(buffer)
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
@@ -749,7 +762,7 @@ func (p *TUICProxy) sendUDPPacketToClient(session *TUICUDPSession, srcAddr net.A
 		PacketID:  0, // Simple implementation, no fragmentation for responses
 		FragTotal: 1,
 		FragID:    0,
-		Size:      uint16(len(data)),
+		Size:      p.safeUint16(len(data)),
 		Address:   addr,
 		Payload:   data,
 	}
@@ -774,14 +787,13 @@ func (p *TUICProxy) buildAddressFromNetAddr(addr net.Addr) *TUICAddress {
 			return &TUICAddress{
 				Type: TUICAddrIPv4,
 				Host: ip4.String(),
-				Port: uint16(a.Port),
+				Port: p.safeUint16(a.Port),
 			}
-		} else {
-			return &TUICAddress{
-				Type: TUICAddrIPv6,
-				Host: a.IP.String(),
-				Port: uint16(a.Port),
-			}
+		}
+		return &TUICAddress{
+			Type: TUICAddrIPv6,
+			Host: a.IP.String(),
+			Port: p.safeUint16(a.Port),
 		}
 	default:
 		host, port, err := net.SplitHostPort(addr.String())
@@ -792,7 +804,7 @@ func (p *TUICProxy) buildAddressFromNetAddr(addr net.Addr) *TUICAddress {
 			return &TUICAddress{
 				Type: TUICAddrDomain,
 				Host: host,
-				Port: uint16(portNum),
+				Port: p.safeUint16(portNum),
 			}
 		}
 		return nil
@@ -891,7 +903,9 @@ func (p *TUICProxy) handleDissociate(clientAddr net.Addr, clientID string, cmd *
 	if clientSessions, exists := p.udpSessions[clientID]; exists {
 		if session, exists := clientSessions[assocID]; exists {
 			if session.TargetConn != nil {
-				session.TargetConn.Close()
+				if err := session.TargetConn.Close(); err != nil {
+					logger.Error("Failed to close UDP session", "err", err)
+				}
 			}
 			delete(clientSessions, assocID)
 			logger.Info("UDP session dissociated", "client", clientAddr, "assoc_id", assocID)
@@ -901,7 +915,7 @@ func (p *TUICProxy) handleDissociate(clientAddr net.Addr, clientID string, cmd *
 }
 
 // handleHeartbeat handles Heartbeat command
-func (p *TUICProxy) handleHeartbeat(clientAddr net.Addr, clientID string, cmd *TUICCommand) {
+func (p *TUICProxy) handleHeartbeat(clientAddr net.Addr, clientID string, _ *TUICCommand) {
 	logger.Debug("Handling TUIC Heartbeat", "client", clientAddr)
 
 	// Check if client is authenticated
@@ -966,7 +980,9 @@ func (p *TUICProxy) cleanupExpiredSessions() {
 			session.mu.Lock()
 			if now.Sub(session.LastUsed) > timeout {
 				if session.TargetConn != nil {
-					session.TargetConn.Close()
+					if err := session.TargetConn.Close(); err != nil {
+						logger.Error("Failed to close expired UDP session", "err", err)
+					}
 				}
 				delete(clientSessions, assocID)
 				logger.Debug("Cleaned up expired UDP session", "client", clientID, "assoc_id", assocID)
@@ -1000,4 +1016,15 @@ func (p *TUICProxy) cleanupExpiredAssemblers() {
 		}
 	}
 	p.assemblersMu.Unlock()
+}
+
+// safeUint16 safely converts an int to uint16 with overflow protection
+func (p *TUICProxy) safeUint16(value int) uint16 {
+	if value < 0 {
+		return 0
+	}
+	if value > 65535 {
+		return 65535
+	}
+	return uint16(value)
 }
