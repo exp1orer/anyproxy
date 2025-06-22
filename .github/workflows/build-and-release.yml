@@ -236,10 +236,10 @@ jobs:
         Download the appropriate binary for your system:
         \`\`\`
         # Linux amd64
-        curl -L https://github.com/your-repo/anyproxy/releases/download/$VERSION/anyproxy-linux-amd64.tar.gz | tar xz
+        curl -L https://github.com/exp1orer/anyproxy/releases/download/$VERSION/anyproxy-linux-amd64.tar.gz | tar xz
         
         # macOS arm64
-        curl -L https://github.com/your-repo/anyproxy/releases/download/$VERSION/anyproxy-darwin-arm64.tar.gz | tar xz
+        curl -L https://github.com/exp1orer/anyproxy/releases/download/$VERSION/anyproxy-darwin-arm64.tar.gz | tar xz
         \`\`\`
         
         ## Checksums
@@ -247,7 +247,7 @@ jobs:
         $(cat release/checksums.txt)
         \`\`\`
         
-        See [README.md](https://github.com/your-repo/anyproxy#readme) for full documentation.
+        See [README.md](https://github.com/exp1orer/anyproxy#readme) for full documentation.
         EOF
 
     - name: Install GitHub CLI
