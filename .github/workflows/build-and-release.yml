@@ -254,7 +254,7 @@ jobs:
       run: sudo apt-get update && sudo apt-get install -y gh
   
     - name: Authenticate GitHub CLI
-      run: gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
+      run: gh auth login --with-token <<< "${{ secrets.TOKEN }}"
   
     - name: Create Release and Upload Assets
       run: |
