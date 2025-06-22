@@ -1,11 +1,16 @@
 name: Build and Release
 
 on:
-  push:
-    branches: [ main, develop ]
-    tags: [ 'v*' ]
-  pull_request:
-    branches: [ main ]
+    workflow_dispatch:
+        inputs:
+            name:
+                description: 'Person to greet'
+                required: true
+                default: 'Mona the Octocat'
+            home:
+                description: 'location'
+                required: false
+                default: 'The Octoverse'
 
 permissions:
   contents: write
